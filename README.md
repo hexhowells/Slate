@@ -1,2 +1,2 @@
 # ZyDash
-Python dashboard interactive AI agents
+Python dashboard for interactive AI agents
