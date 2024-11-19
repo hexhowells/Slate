@@ -1,0 +1,26 @@
+<html>
+    <head>
+        <title>ZyDash Dashboard</title>
+        <script>
+            function sendControl(action) {
+                fetch('/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ action: action }),
+                }).then(response => response.json())
+                  .then(data => console.log('Success:', data))
+                  .catch((error) => console.error('Error:', error));
+            }
+        </script>
+    </head>
+    <body>
+        <h1>ZyDash Dashboard</h1>
+        <img src="/video_feed" style="display: block; margin-bottom: 20px;">
+        <button onclick="sendControl('start')">Start</button>
+        <button onclick="sendControl('pause')">Pause</button>
+        <button onclick="sendControl('restart')">Restart</button>
+        <button onclick="sendControl('step')">Step</button>
+    </body>
+</html>
