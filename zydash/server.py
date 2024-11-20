@@ -3,6 +3,7 @@ import cv2
 import threading
 import time
 import atexit
+import warnings
 
 
 class ZyDash:
@@ -129,3 +130,16 @@ class ZyDashLegacy(ZyDash):
                 
                 time.sleep(self.frame_rate)
                 self.step_requested.clear()
+
+
+class Agent:
+    def __init__(self):
+        pass
+
+    def get_action(self, env):
+        warnings.warn(
+            "get_action function not implemented. Using random policy for now.",
+            UserWarning,
+            stacklevel=2
+        )
+        return env.action_space.sample()
