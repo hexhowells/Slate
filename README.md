@@ -1,2 +1,5 @@
-# ZyDash
-Python dashboard for interactive AI agents
+<p align="center">
+  <img src="https://github.com/hexhowells/ZyDash/blob/main/banner.png">
+</p>
+
+### Python dashboard for interactive AI agents
