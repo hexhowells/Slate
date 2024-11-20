@@ -1,9 +1,10 @@
 import gym
-from zydash import ZyDash
+from zydash import ZyDash, Agent
 
 
-class RandomAgent:
+class RandomAgent(Agent):
     def __init__(self, action_space):
+        super().__init__()
         self.action_space = action_space
 
     def get_action(self, env):
