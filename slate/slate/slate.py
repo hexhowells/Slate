@@ -27,7 +27,7 @@ class SlateClient:
         high_score: Highest reward observed so far
         checkpoint: Filename of the saved model checkpoint
     """
-    def __init__(self, env, agent, frame_rate=0.1, checkpoints_dir = None):
+    def __init__(self, env, agent, frame_rate=0.1, checkpoints_dir = None) -> None:
         self.env = env
         self.agent = agent
         self.frame_rate = frame_rate
@@ -63,7 +63,7 @@ class SlateClient:
         )
 
 
-    def encode_frame(self, frame):
+    def encode_frame(self, frame) -> None:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
 
@@ -77,7 +77,7 @@ class SlateClient:
         return base64.b64encode(img).decode('utf-8')
 
 
-    def run_step(self):
+    def run_step(self) -> None:
         """
         Execute a single step in the environment using the agent or random policy,
         and update internal state values.
@@ -101,7 +101,7 @@ class SlateClient:
             self.env.reset()
 
 
-    async def send_state(self):
+    async def send_state(self) -> None:
         """
         Send the current environment state, including encoded frame and metadata,
         over the active WebSocket connection.
@@ -124,7 +124,10 @@ class SlateClient:
             }))
 
 
-    async def _send_checkpoints(self):
+    async def _send_checkpoints(self) -> None:
+        """
+        Send checkpoints to the server via a websocket
+        """
         await self.websocket.send(
             json.dumps(
                 {
@@ -157,7 +160,7 @@ class SlateClient:
                 await self._send_checkpoints()
 
 
-    async def run_loop(self):
+    async def run_loop(self) -> None:
         """
         Continuously execute steps in the environment and send updated state
         to the WebSocket server as long as `self.running` is True.
@@ -168,7 +171,7 @@ class SlateClient:
             await asyncio.sleep(self.frame_rate)
 
 
-    async def ws_handler(self, websocket):
+    async def ws_handler(self, websocket) -> None:
         """
         Handle incoming WebSocket messages and perform actions like step, run, pause, and reset.
 
@@ -181,6 +184,7 @@ class SlateClient:
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
         await self.send_state()
+        print(self.checkpoints)
         await self._send_checkpoints()
 
         # start watcher
@@ -214,7 +218,7 @@ class SlateClient:
             print("[SlateRunner] connection lost")
 
 
-    async def _dial_and_serve(self, url):
+    async def _dial_and_serve(self, url: str) -> None:
         """
         Attempt to connect to the WebSocket server and handle interaction.
         Will automatically retry connection on failure.
@@ -232,7 +236,7 @@ class SlateClient:
                 await asyncio.sleep(1)
 
 
-    def start_client(self, url="ws://localhost:8765"):
+    def start_client(self, url: str="ws://localhost:8765") -> None:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
 
