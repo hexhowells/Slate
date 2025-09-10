@@ -19,6 +19,7 @@ def index():
     Returns:
         Response: The index.html file for the web UI
     """
+    _send_to_ml({"type": "send_checkpoints"})
     return send_from_directory("static", "index.html")
 
 
@@ -36,7 +37,9 @@ async def ml_handler(ws):
     print("[ML] connected")
     try:
         async for msg in ws:
-            socketio.emit("frame_update", json.loads(msg))
+            data = json.loads(msg)
+            evt = data.get("type", "frame_update")
+            socketio.emit(evt, data)
     finally:
         ml_clients.discard(ws)
         print("[ML] disconnected")
@@ -118,6 +121,11 @@ def on_reset():
     Forwards a 'reset' command from the browser to the ML client.
     """
     _send_to_ml({"type": "reset"})
+
+
+@socketio.on("select_checkpoint")
+def on_select_checkpoint(data):
+    _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
 
 
 if __name__ == "__main__":
