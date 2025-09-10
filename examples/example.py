@@ -1,3 +1,4 @@
+import argparse
 import ale_py
 import gymnasium as gym
 import numpy as np
@@ -13,7 +14,21 @@ class RandomAgent:
 
 
 if __name__ == "__main__":
-    env = gym.make("ALE/Breakout-v5", render_mode='rgb_array')
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ckpt_dir",
+        default="checkpoints",
+        help="Folder that contains .pth model checkpoints",
+    )
+    parser.add_argument(
+        "--server",
+        default="ws://localhost:8765",
+        help="Slate server websocket URL",
+    )
+    args = parser.parse_args()
+
+    env = gym.make("ALE/Breakout-v5", render_mode="rgb_array")
     agent = RandomAgent()
-    runner = SlateClient(env, agent)
-    runner.start_client(url="ws://localhost:8765")
+    runner = SlateClient(env, agent, checkpoints_dir=args.ckpt_dir)
+    runner.start_client(url=args.server)
+
