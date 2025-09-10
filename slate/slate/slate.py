@@ -1,4 +1,11 @@
-import asyncio, json, base64, cv2, websockets, threading, time
+import asyncio
+import json
+import base64
+import cv2
+import websockets
+import threading
+import time
+import os
 
 
 class SlateClient:
@@ -20,7 +27,7 @@ class SlateClient:
         high_score: Highest reward observed so far
         checkpoint: Filename of the saved model checkpoint
     """
-    def __init__(self, env, agent, frame_rate=0.1):
+    def __init__(self, env, agent, frame_rate=0.1, checkpoints_dir = None):
         self.env = env
         self.agent = agent
         self.frame_rate = frame_rate
@@ -36,7 +43,24 @@ class SlateClient:
         self.done = False
         self.info = {}
         self.high_score = 0
-        self.checkpoint = "model_12.pth"
+
+        self.ckpt_dir = checkpoints_dir
+        self.checkpoints: list[str] = []
+        self._rescan_checkpoints()
+        self.checkpoint = (self.checkpoints[-1] if self.checkpoints else None) or ""
+
+
+    def _rescan_checkpoints(self) -> None:
+        """
+        Lists all files in the specified checkpoints folder with the file extension .pth
+
+        Updates the checkpoints class variable with the new list
+        """
+        if not self.ckpt_dir:
+            return
+        self.checkpoints = sorted(
+            [f for f in os.listdir(self.ckpt_dir) if f.endswith(".pth")]
+        )
 
 
     def encode_frame(self, frame):
@@ -100,6 +124,39 @@ class SlateClient:
             }))
 
 
+    async def _send_checkpoints(self):
+        await self.websocket.send(
+            json.dumps(
+                {
+                    "type": "checkpoints_update",
+                    "payload": {"checkpoints": self.checkpoints},
+                }
+            )
+        )
+
+
+    async def watch_checkpoints(self) -> None:
+        """
+        Continuously watch the checkpoints folder for additional checkpoints
+
+        If additional checkpoints are found, then send the new checkpoint values
+        to the server via the websocket
+        """
+        if not self.ckpt_dir:
+            return
+
+        all_checkpoints = set(self.checkpoints)
+
+        while True:
+            await asyncio.sleep(1.0)
+            self._rescan_checkpoints()
+            new_checkpoints = set(self.checkpoints)
+
+            if new_checkpoints != all_checkpoints:
+                all_checkpoints = new_checkpoints
+                await self._send_checkpoints()
+
+
     async def run_loop(self):
         """
         Continuously execute steps in the environment and send updated state
@@ -124,11 +181,17 @@ class SlateClient:
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
         await self.send_state()
+        await self._send_checkpoints()
+
+        # start watcher
+        if self.ckpt_dir:
+            asyncio.create_task(self.watch_checkpoints())
 
         try:
             async for msg in websocket:
                 data = json.loads(msg)
                 command = data.get("type")
+                print(f'Client received command: {command}')
 
                 if command == "step":
                     self.run_step()
@@ -142,6 +205,11 @@ class SlateClient:
                 elif command == "reset":
                     self.env.reset()
                     await self.send_state()
+                elif command == "select_checkpoint":
+                    self.checkpoint = data.get("checkpoint", "")
+                    await self.send_state()
+                elif command == "send_checkpoints":
+                    await self._send_checkpoints()
         except websockets.ConnectionClosed:
             print("[SlateRunner] connection lost")
 
@@ -154,7 +222,7 @@ class SlateClient:
         Args:
             url (str): The WebSocket server URL (e.g., ws://localhost:8765)
         """
-        while True:
+        for _ in range(10):
             try:
                 print(f"[SlateRunner] dialing {url}")
                 async with websockets.connect(url) as ws:
