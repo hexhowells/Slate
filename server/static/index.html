@@ -132,19 +132,90 @@
     <script>
       const socket = io();
       let cumulativeScore = 0;
+      let checkpointRetryCount = 0;
+      const maxRetries = 5;
+
+      function requestCheckpoints() {
+        console.log("requesting checkpoints")
+        socket.emit("send_checkpoints")
+      }
+
+      socket.on("connect", () => {
+        console.log("Socket connected, requesting checkpoints");
+        checkpointsReceived = false; // Reset flag on reconnect
+        checkpointRetryCount = 0; // Reset retry count
+        requestCheckpoints();
+      });
+
+      socket.on("disconnect", () => {
+        console.log("Socket disconnected");
+        checkpointsReceived = false;
+      });
+
+      // Request checkpoints immediately when page loads
+      requestCheckpoints()
 
       // receive fresh checkpoint list
       socket.on("checkpoints_update", (msg) => {
+        console.log("received checkpoints", msg.payload.checkpoints);
+        checkpointsReceived = true;
+        
+        // Clear any pending retry
+        if (retryTimeout) {
+          clearTimeout(retryTimeout);
+          retryTimeout = null;
+        }
+        
         const checkpoints = msg.payload.checkpoints;
         const sel = document.getElementById("ckpt_select");
         sel.innerHTML = "";
-        checkpoints.forEach((ckpt) => {
+        
+        if (checkpoints.length === 0) {
           const opt = document.createElement("option");
-          opt.value = ckpt;
-          opt.textContent = ckpt;
+          opt.textContent = "No checkpoints available";
+          opt.disabled = true;
           sel.appendChild(opt);
-        });
+        } else {
+          checkpoints.forEach((ckpt) => {
+            const opt = document.createElement("option");
+            opt.value = ckpt;
+            opt.textContent = ckpt;
+            sel.appendChild(opt);
+          });
+        }
+        
+        // Reset retry count on successful response
+        checkpointRetryCount = 0;
       });
+
+      // Track if we've received checkpoints
+      let checkpointsReceived = false;
+      let retryTimeout = null;
+
+      function scheduleRetry() {
+        if (retryTimeout) {
+          clearTimeout(retryTimeout);
+        }
+        
+        if (checkpointRetryCount < maxRetries && !checkpointsReceived) {
+          checkpointRetryCount++;
+          console.log(`Scheduling retry ${checkpointRetryCount}/${maxRetries} in 3 seconds`);
+          retryTimeout = setTimeout(() => {
+            if (!checkpointsReceived) {
+              console.log(`Retrying checkpoint request (${checkpointRetryCount}/${maxRetries})`);
+              requestCheckpoints();
+              scheduleRetry(); // Schedule next retry
+            }
+          }, 3000);
+        } else if (!checkpointsReceived) {
+          console.log("Max retries reached for checkpoint request");
+          const sel = document.getElementById("ckpt_select");
+          sel.innerHTML = '<option disabled selected>No ML client connected</option>';
+        }
+      }
+
+      // Start retry mechanism after initial request
+      scheduleRetry();
 
       // receive frame updates
       socket.on("frame_update", (msg) => {

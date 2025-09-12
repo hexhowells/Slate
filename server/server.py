@@ -128,6 +128,14 @@ def on_select_checkpoint(data):
     _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
 
 
+@socketio.on("send_checkpoints")
+def on_send_checkpoints():
+    """
+    Forwards a 'send_checkpoints' command from the browser to the ML client.
+    """
+    _send_to_ml({"type": "send_checkpoints"})
+
+
 if __name__ == "__main__":
     """
     Starts the Flask-SocketIO server for browser communication on port 8000.
