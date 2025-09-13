@@ -63,7 +63,7 @@ class SlateClient:
         )
 
 
-    def encode_frame(self, frame) -> None:
+    def encode_frame(self, frame) -> str:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
 
