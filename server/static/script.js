@@ -23,6 +23,7 @@ class SlateViewer {
   initializeEventListeners() {
     this.socket.on("connect", () => {
       console.log("Socket connected, requesting checkpoints");
+      this.updateConnectionStatus('connected', 'Connected');
       this.checkpointsReceived = false;
       this.checkpointRetryCount = 0;
       this.requestCheckpoints();
@@ -30,6 +31,7 @@ class SlateViewer {
 
     this.socket.on("disconnect", () => {
       console.log("Socket disconnected");
+      this.updateConnectionStatus('disconnected', 'Disconnected');
       this.checkpointsReceived = false;
     });
 
@@ -66,15 +68,23 @@ class SlateViewer {
     
     const checkpoints = msg.payload.checkpoints;
     const selectElement = document.getElementById("ckpt_select");
-    selectElement.innerHTML = "";
     
-    if (checkpoints.length === 0) {
-      this.addOption(selectElement, "No checkpoints available", true);
-    } else {
-      checkpoints.forEach((checkpoint) => {
-        this.addOption(selectElement, checkpoint, false, checkpoint);
-      });
-    }
+    // Add loading animation
+    selectElement.classList.add('loading');
+    
+    setTimeout(() => {
+      selectElement.innerHTML = "";
+      
+      if (checkpoints.length === 0) {
+        this.addOption(selectElement, "No checkpoints available", true);
+      } else {
+        checkpoints.forEach((checkpoint) => {
+          this.addOption(selectElement, checkpoint, false, checkpoint);
+        });
+      }
+      
+      selectElement.classList.remove('loading');
+    }, 300);
     
     // Reset retry count on successful response
     this.checkpointRetryCount = 0;
@@ -86,10 +96,18 @@ class SlateViewer {
    */
   handleFrameUpdate(msg) {
     const payload = msg.payload;
+    const frameElement = document.getElementById("env_frame");
+    
+    // Add subtle animation to frame updates
+    frameElement.style.opacity = '0.7';
     
     // Update frame image
-    document.getElementById("env_frame").src = 
-      "data:image/jpeg;base64," + payload.frame;
+    frameElement.src = "data:image/jpeg;base64," + payload.frame;
+    
+    // Restore opacity after image loads
+    frameElement.onload = () => {
+      frameElement.style.opacity = '1';
+    };
 
     // Update info display
     this.updateInfoDisplay(payload);
@@ -97,9 +115,22 @@ class SlateViewer {
     // Keep dropdown in sync with currently running checkpoint
     this.syncCheckpointDropdown(payload.checkpoint);
 
-    // Update cumulative score
+    // Update cumulative score with animation
     this.cumulativeScore += payload.reward;
-    document.getElementById("score").innerText = Math.round(this.cumulativeScore);
+    const scoreElement = document.getElementById("score");
+    const newScore = Math.round(this.cumulativeScore);
+    
+    // Animate score change
+    if (scoreElement.innerText !== newScore.toString()) {
+      scoreElement.style.transform = 'scale(1.1)';
+      scoreElement.style.color = '#28a745';
+      scoreElement.innerText = newScore;
+      
+      setTimeout(() => {
+        scoreElement.style.transform = 'scale(1)';
+        scoreElement.style.color = '#28a745';
+      }, 200);
+    }
   }
 
   /**
@@ -187,6 +218,21 @@ class SlateViewer {
    */
   onSelectCheckpoint(selectElement) {
     this.socket.emit("select_checkpoint", { checkpoint: selectElement.value });
+  }
+
+  /**
+   * Update connection status indicator
+   * @param {string} status - Connection status ('connected', 'disconnected', 'connecting')
+   * @param {string} text - Status text to display
+   */
+  updateConnectionStatus(status, text) {
+    const statusDot = document.querySelector('.status-dot');
+    const statusText = document.querySelector('.status-text');
+    
+    if (statusDot && statusText) {
+      statusDot.className = `status-dot ${status}`;
+      statusText.textContent = text;
+    }
   }
 }
 
