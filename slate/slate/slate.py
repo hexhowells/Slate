@@ -35,6 +35,7 @@ class SlateClient:
         self.step_mode = False
         self.state_lock = threading.Lock()
         self.loop_task = None
+        self.url_endpoint = "ws://localhost:8765"
 
         self.env.reset()
         self.current_frame = None
@@ -48,6 +49,19 @@ class SlateClient:
         self.checkpoints: list[str] = []
         self._rescan_checkpoints()
         self.checkpoint = (self.checkpoints[-1] if self.checkpoints else None) or ""
+    
+
+    def init(
+            self, 
+            endpoint:str|None = None
+        ) -> None:
+        """
+        Inititliase the client with user-defined parameters
+
+        Args:
+            endpoint: the server endpoint that the client with connect to
+        """
+        self.url_endpoint = endpoint or self.url_endpoint
 
 
     def _rescan_checkpoints(self) -> None:
@@ -236,11 +250,11 @@ class SlateClient:
                 await asyncio.sleep(1)
 
 
-    def start_client(self, url: str="ws://localhost:8765") -> None:
+    def start_client(self) -> None:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
 
         Args:
             url (str): WebSocket server address
         """
-        asyncio.run(self._dial_and_serve(url))
+        asyncio.run(self._dial_and_serve(self.url_endpoint))
