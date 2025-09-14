@@ -4,8 +4,8 @@ import base64
 import cv2
 import websockets
 import threading
-import time
 import os
+from slate import Agent
 
 
 class SlateClient:
@@ -28,7 +28,13 @@ class SlateClient:
         high_score: Highest reward observed so far
         checkpoint: Filename of the saved model checkpoint
     """
-    def __init__(self, env, agent, frame_rate=0.1, checkpoints_dir = None) -> None:
+    def __init__(
+            self, 
+            env, 
+            agent: Agent, 
+            frame_rate: float=0.1, 
+            checkpoints_dir: str|None=None
+        ) -> None:
         self.env = env
         self.agent = agent
         self.frame_rate = frame_rate
