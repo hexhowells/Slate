@@ -218,23 +218,24 @@ class SlateClient:
                 command = data.get("type")
                 print(f'Client received command: {command}')
 
-                if command == "step":
-                    self.run_step()
-                    await self.send_state()
-                elif command == "run":
-                    self.running = True
-                    if not self.loop_task or self.loop_task.done():
-                        self.loop_task = asyncio.create_task(self.run_loop())
-                elif command == "pause":
-                    self.running = False
-                elif command == "reset":
-                    self.env.reset()
-                    await self.send_state()
-                elif command == "select_checkpoint":
-                    self.checkpoint = data.get("checkpoint", "")
-                    await self.send_state()
-                elif command == "send_checkpoints":
-                    await self._send_checkpoints()
+                match command:
+                    case "step":
+                        self.run_step()
+                        await self.send_state()
+                    case "run":
+                        self.running = True
+                        if not self.loop_task or self.loop_task.done():
+                            self.loop_task = asyncio.create_task(self.run_loop())
+                    case "pause":
+                        self.running = False
+                    case "reset":
+                        self.env.reset()
+                        await self.send_state()
+                    case "select_checkpoint":
+                        self.checkpoint = data.get("checkpoint", "")
+                        await self.send_state()
+                    case "send_checkpoints":
+                        await self._send_checkpoints()
         except websockets.ConnectionClosed:
             print("[SlateRunner] connection lost")
 
