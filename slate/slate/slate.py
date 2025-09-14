@@ -5,6 +5,7 @@ import cv2
 import websockets
 import threading
 import os
+import numpy as np
 from slate import Agent
 
 
@@ -84,12 +85,12 @@ class SlateClient:
         )
 
 
-    def encode_frame(self, frame) -> str:
+    def encode_frame(self, frame: np.ndarray) -> str:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
 
         Args:
-            frame (np.ndarray): RGB image from the environment
+            frame: RGB image from the environment
 
         Returns:
             str: Base64 string of the JPEG-encoded frame
@@ -197,7 +198,7 @@ class SlateClient:
         Handle incoming WebSocket messages and perform actions like step, run, pause, and reset.
 
         Args:
-            websocket (WebSocketClientProtocol): Connected WebSocket client
+            websocket: Connected WebSocket client
 
         Raises:
             websockets.exceptions.ConnectionClosed: If the WebSocket connection is terminated
@@ -246,7 +247,7 @@ class SlateClient:
         Will automatically retry connection on failure.
 
         Args:
-            url (str): The WebSocket server URL (e.g., ws://localhost:8765)
+            url: The WebSocket server URL (e.g., ws://localhost:8765)
         """
         for _ in range(10):
             try:
@@ -261,8 +262,5 @@ class SlateClient:
     def start_client(self) -> None:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
-
-        Args:
-            url (str): WebSocket server address
         """
         asyncio.run(self._dial_and_serve(self.url_endpoint))
