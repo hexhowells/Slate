@@ -17,6 +17,7 @@ class SlateClient:
         env: A Gym-like environment that supports reset, step, and render methods
         agent: Agent with get_action(env) and optionally get_q_values(obs)
         frame_rate: Delay (in seconds) between steps during continuous run
+        checkpoints_dir: the directory which the agent checkpoints are stored
 
     Attributes:
         current_frame: Base64-encoded JPEG of the latest environment render
