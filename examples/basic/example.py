@@ -9,6 +9,7 @@ from slate import Agent
 class RandomAgent(Agent):
     def __init__(self, env):
         self.env = env
+        
     def get_action(self, frame):
         return self.env.action_space.sample()
     
@@ -36,6 +37,6 @@ if __name__ == "__main__":
     env = gym.make("ALE/Breakout-v5", render_mode="rgb_array")
     agent = RandomAgent(env)
     runner = SlateClient(env, agent, checkpoints_dir=args.ckpt_dir)
-    runner.init(endpoint=args.server)
+    runner.init(endpoint=args.server, run_local=True)
     runner.start_client()
 
