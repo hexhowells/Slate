@@ -93,11 +93,6 @@ def _send_to_ml(payload: dict) -> None:
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
-# @socketio.on("connect")
-# def on_browser_connect():
-#     print("[Browser] connected")
-
-
 @socketio.on("step")
 def on_step() -> None:
     """Request a single environment step from the ML runtime."""
