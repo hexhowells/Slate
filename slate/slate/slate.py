@@ -6,7 +6,7 @@ import websockets
 import threading
 import os
 import numpy as np
-from slate import Agent
+from .agent import Agent
 
 
 class SlateClient:
@@ -61,15 +61,18 @@ class SlateClient:
 
     def init(
             self, 
-            endpoint:str|None = None
+            endpoint:str|None = None,
+            run_local: bool = False,
         ) -> None:
         """
         Inititliase the client with user-defined parameters
 
         Args:
             endpoint: the server endpoint that the client with connect to
+            run_local: whether to run the slate server locally or connect to a cloud server
         """
         self.url_endpoint = endpoint or self.url_endpoint
+        self.run_local = run_local
 
 
     def _rescan_checkpoints(self) -> None:
@@ -206,7 +209,6 @@ class SlateClient:
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
         await self.send_state()
-        print(self.checkpoints)
         await self._send_checkpoints()
 
         # start watcher
@@ -217,7 +219,7 @@ class SlateClient:
             async for msg in websocket:
                 data = json.loads(msg)
                 command = data.get("type")
-                print(f'Client received command: {command}')
+                #print(f'Client received command: {command}')
 
                 match command:
                     case "step":
@@ -263,4 +265,14 @@ class SlateClient:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
         """
+        # If configured to run locally, start the embedded server and point endpoint to localhost
+        if getattr(self, "run_local", False):
+            try:
+                from .server import start_local_server
+                # Start local dashboard on 127.0.0.1:8000 and ML WS bridge on 127.0.0.1:8765
+                start_local_server(host="127.0.0.1", port=8000)
+                self.url_endpoint = "ws://127.0.0.1:8765"
+                print("[Slate] Open dashboard at http://127.0.0.1:8000")
+            except Exception as e:
+                print(f"[Slate] Failed to start local server: {e}")
         asyncio.run(self._dial_and_serve(self.url_endpoint))
