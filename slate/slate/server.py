@@ -103,7 +103,10 @@ def on_send_checkpoints():
     _send_to_ml({"type": "send_checkpoints"})
 
 
-def start_local_server(host: str = "127.0.0.1", port: int = 8000) -> None:
+def start_local_server(
+        host: str="127.0.0.1", 
+        port: int=8000
+        ) -> None:
     """
     Start the local Slate dashboard server and the ML WebSocket bridge in background threads.
 
