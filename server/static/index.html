@@ -2,46 +2,57 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slate Viewer</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="static/styles.css" />
+    <link rel="icon" href="static/logo.ico" type="image/x-icon" />
   </head>
   <body>
-    <header>
-      <img src="static/logo.png" alt="Slate Logo" />
-      <h1>Slate Viewer</h1>
-    </header>
+    <div class="container">
+      <header>
+        <img src="static/logo.png" alt="Slate Logo" />
+        <h1>Slate Viewer</h1>
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </div>
+      </header>
 
-    <div class="viewer">
-      <div class="frame-container">
-        <img id="env_frame" src="" />
-      </div>
-
-      <div class="controls">
-        <div class="dropdowns">
-          <!-- single checkpoint dropdown -->
-          <select id="ckpt_select" onchange="onSelectCheckpoint(this)">
-            <option disabled selected>Loading checkpoints…</option>
-          </select>
+      <div class="viewer">
+        <div class="frame-wrapper">
+          <div class="frame-container">
+            <img id="env_frame" src="" alt="Environment Frame" />
+          </div>
         </div>
 
-        <div class="info" id="info">
-          <div>Q-values: [–]</div>
-          <div>Action: –</div>
-          <div>Reward: –</div>
-          <div>Checkpoint: –</div>
-        </div>
+        <div class="controls">
+          <div class="dropdowns">
+            <label for="ckpt_select" style="font-weight: 600; color: #555; margin-bottom: 0.5rem; display: block;">Model Checkpoint</label>
+            <select id="ckpt_select" onchange="onSelectCheckpoint(this)">
+              <option disabled selected>Loading checkpoints…</option>
+            </select>
+          </div>
 
-        <div class="control-buttons">
-          <button onclick="sendCommand('step')">⏭ Step</button>
-          <button onclick="sendCommand('run')">▶ Run</button>
-          <button onclick="sendCommand('pause')">⏸ Pause</button>
-          <button onclick="sendCommand('reset')">🔁 Reset</button>
-        </div>
+          <div class="info" id="info">
+            <div>Q-values: [–]</div>
+            <div>Action: –</div>
+            <div>Reward: –</div>
+            <div>Checkpoint: –</div>
+          </div>
 
-        <div class="score-box">
-          Total Score: <span id="score">–</span><br />
-          <button class="save-button">💾 Save Run</button>
+          <div class="control-buttons">
+            <button onclick="sendCommand('step')" title="Execute one step">⏭ Step</button>
+            <button onclick="sendCommand('run')" title="Start continuous running">▶ Run</button>
+            <button onclick="sendCommand('pause')" title="Pause execution">⏸ Pause</button>
+            <button onclick="sendCommand('reset')" title="Reset environment">🔁 Reset</button>
+          </div>
+
+          <div class="score-box">
+            <div style="font-size: 0.9rem; margin-bottom: 0.4rem;">Total Score</div>
+            <span id="score">–</span>
+            <button class="save-button" title="Save current run data">💾 Save Run</button>
+          </div>
         </div>
       </div>
     </div>

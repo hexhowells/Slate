@@ -4,8 +4,9 @@ import base64
 import cv2
 import websockets
 import threading
-import time
 import os
+import numpy as np
+from slate import Agent
 
 
 class SlateClient:
@@ -17,6 +18,7 @@ class SlateClient:
         env: A Gym-like environment that supports reset, step, and render methods
         agent: Agent with get_action(env) and optionally get_q_values(obs)
         frame_rate: Delay (in seconds) between steps during continuous run
+        checkpoints_dir: the directory which the agent checkpoints are stored
 
     Attributes:
         current_frame: Base64-encoded JPEG of the latest environment render
@@ -27,7 +29,13 @@ class SlateClient:
         high_score: Highest reward observed so far
         checkpoint: Filename of the saved model checkpoint
     """
-    def __init__(self, env, agent, frame_rate=0.1, checkpoints_dir = None) -> None:
+    def __init__(
+            self, 
+            env, 
+            agent: Agent, 
+            frame_rate: float=0.1, 
+            checkpoints_dir: str|None=None
+        ) -> None:
         self.env = env
         self.agent = agent
         self.frame_rate = frame_rate
@@ -35,6 +43,7 @@ class SlateClient:
         self.step_mode = False
         self.state_lock = threading.Lock()
         self.loop_task = None
+        self.url_endpoint = "ws://localhost:8765"
 
         self.env.reset()
         self.current_frame = None
@@ -48,6 +57,19 @@ class SlateClient:
         self.checkpoints: list[str] = []
         self._rescan_checkpoints()
         self.checkpoint = (self.checkpoints[-1] if self.checkpoints else None) or ""
+    
+
+    def init(
+            self, 
+            endpoint:str|None = None
+        ) -> None:
+        """
+        Inititliase the client with user-defined parameters
+
+        Args:
+            endpoint: the server endpoint that the client with connect to
+        """
+        self.url_endpoint = endpoint or self.url_endpoint
 
 
     def _rescan_checkpoints(self) -> None:
@@ -63,12 +85,12 @@ class SlateClient:
         )
 
 
-    def encode_frame(self, frame) -> str:
+    def encode_frame(self, frame: np.ndarray) -> str:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
 
         Args:
-            frame (np.ndarray): RGB image from the environment
+            frame: RGB image from the environment
 
         Returns:
             str: Base64 string of the JPEG-encoded frame
@@ -176,7 +198,7 @@ class SlateClient:
         Handle incoming WebSocket messages and perform actions like step, run, pause, and reset.
 
         Args:
-            websocket (WebSocketClientProtocol): Connected WebSocket client
+            websocket: Connected WebSocket client
 
         Raises:
             websockets.exceptions.ConnectionClosed: If the WebSocket connection is terminated
@@ -197,23 +219,24 @@ class SlateClient:
                 command = data.get("type")
                 print(f'Client received command: {command}')
 
-                if command == "step":
-                    self.run_step()
-                    await self.send_state()
-                elif command == "run":
-                    self.running = True
-                    if not self.loop_task or self.loop_task.done():
-                        self.loop_task = asyncio.create_task(self.run_loop())
-                elif command == "pause":
-                    self.running = False
-                elif command == "reset":
-                    self.env.reset()
-                    await self.send_state()
-                elif command == "select_checkpoint":
-                    self.checkpoint = data.get("checkpoint", "")
-                    await self.send_state()
-                elif command == "send_checkpoints":
-                    await self._send_checkpoints()
+                match command:
+                    case "step":
+                        self.run_step()
+                        await self.send_state()
+                    case "run":
+                        self.running = True
+                        if not self.loop_task or self.loop_task.done():
+                            self.loop_task = asyncio.create_task(self.run_loop())
+                    case "pause":
+                        self.running = False
+                    case "reset":
+                        self.env.reset()
+                        await self.send_state()
+                    case "select_checkpoint":
+                        self.checkpoint = data.get("checkpoint", "")
+                        await self.send_state()
+                    case "send_checkpoints":
+                        await self._send_checkpoints()
         except websockets.ConnectionClosed:
             print("[SlateRunner] connection lost")
 
@@ -224,7 +247,7 @@ class SlateClient:
         Will automatically retry connection on failure.
 
         Args:
-            url (str): The WebSocket server URL (e.g., ws://localhost:8765)
+            url: The WebSocket server URL (e.g., ws://localhost:8765)
         """
         for _ in range(10):
             try:
@@ -236,11 +259,8 @@ class SlateClient:
                 await asyncio.sleep(1)
 
 
-    def start_client(self, url: str="ws://localhost:8765") -> None:
+    def start_client(self) -> None:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
-
-        Args:
-            url (str): WebSocket server address
         """
-        asyncio.run(self._dial_and_serve(url))
+        asyncio.run(self._dial_and_serve(self.url_endpoint))
