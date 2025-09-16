@@ -52,6 +52,7 @@ class SlateClient:
         self.done = False
         self.info = {}
         self.high_score = 0
+        self.run_local = False
 
         self.ckpt_dir = checkpoints_dir
         self.checkpoints: list[str] = []
@@ -72,7 +73,9 @@ class SlateClient:
             run_local: whether to run the slate server locally or connect to a cloud server
         """
         self.url_endpoint = endpoint or self.url_endpoint
-        self.run_local = run_local
+        if run_local:
+            self.run_local = run_local
+            self.url_endpoint = "ws://127.0.0.1:8765"
 
 
     def _rescan_checkpoints(self) -> None:
@@ -266,13 +269,12 @@ class SlateClient:
         Start the client and block the main thread to handle interaction with the WebSocket server.
         """
         # If configured to run locally, start the embedded server and point endpoint to localhost
-        if getattr(self, "run_local", False):
+        if self.run_local:
             try:
                 from .server import start_local_server
                 # Start local dashboard on 127.0.0.1:8000 and ML WS bridge on 127.0.0.1:8765
                 start_local_server(host="127.0.0.1", port=8000)
-                self.url_endpoint = "ws://127.0.0.1:8765"
-                print("[Slate] Open dashboard at http://127.0.0.1:8000")
+                print(f"\033[95m[Slate] Open dashboard at http://127.0.0.1:8000\033[0m")
             except Exception as e:
                 print(f"[Slate] Failed to start local server: {e}")
         asyncio.run(self._dial_and_serve(self.url_endpoint))
