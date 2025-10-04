@@ -127,6 +127,7 @@ class SlateClient:
 
         if done:
             self.env.reset()
+            self.running = False
 
 
     async def send_state(self) -> None:
@@ -236,6 +237,7 @@ class SlateClient:
                         self.running = False
                     case "reset":
                         self.env.reset()
+                        self.running = False
                         await self.send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
