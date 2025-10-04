@@ -12,8 +12,16 @@ class SlateViewer {
     this.checkpointsReceived = false;
     this.retryTimeout = null;
     
+    // Playback functionality
+    this.isPlaybackMode = false;
+    this.currentPlaybackData = null;
+    this.playbackIndex = 0;
+    this.playbackInterval = null;
+    this.playbackSpeed = 100; // ms between frames
+    
     this.initializeEventListeners();
     this.requestCheckpoints();
+    this.requestRunHistory();
     this.scheduleRetry();
   }
 
@@ -22,11 +30,12 @@ class SlateViewer {
    */
   initializeEventListeners() {
     this.socket.on("connect", () => {
-      console.log("Socket connected, requesting checkpoints");
+      console.log("Socket connected, requesting checkpoints and run history");
       this.updateConnectionStatus('connected', 'Connected');
       this.checkpointsReceived = false;
       this.checkpointRetryCount = 0;
       this.requestCheckpoints();
+      this.requestRunHistory();
     });
 
     this.socket.on("disconnect", () => {
@@ -42,6 +51,22 @@ class SlateViewer {
     this.socket.on("frame_update", (msg) => {
       this.handleFrameUpdate(msg);
     });
+
+    this.socket.on("run_history_update", (msg) => {
+      this.handleRunHistoryUpdate(msg);
+    });
+
+    this.socket.on("playback_data", (msg) => {
+      this.handlePlaybackData(msg);
+    });
+
+    this.socket.on("playback_data_start", (msg) => {
+      this.handlePlaybackDataStart(msg);
+    });
+
+    this.socket.on("playback_data_chunk", (msg) => {
+      this.handlePlaybackDataChunk(msg);
+    });
   }
 
   /**
@@ -50,6 +75,14 @@ class SlateViewer {
   requestCheckpoints() {
     console.log("Requesting checkpoints");
     this.socket.emit("send_checkpoints");
+  }
+
+  /**
+   * Request run history from the server
+   */
+  requestRunHistory() {
+    console.log("Requesting run history");
+    this.socket.emit("get_run_history");
   }
 
   /**
@@ -131,6 +164,239 @@ class SlateViewer {
         scoreElement.style.color = '#28a745';
       }, 200);
     }
+  }
+
+  /**
+   * Handle run history updates from the server
+   * @param {Object} msg - Message containing run history data
+   */
+  handleRunHistoryUpdate(msg) {
+    console.log("Received run history:", msg.run_history);
+    this.updateHistoryList(msg.run_history);
+  }
+
+  /**
+   * Handle playback data from the server
+   * @param {Object} msg - Message containing playback data
+   */
+  handlePlaybackData(msg) {
+    console.log("Received playback data:", msg.payload);
+    this.currentPlaybackData = msg.payload;
+    this.playbackIndex = 0;
+    this.enterPlaybackMode();
+  }
+
+  /**
+   * Handle chunked playback data start
+   * @param {Object} msg - Message containing playback info
+   */
+  handlePlaybackDataStart(msg) {
+    console.log("Starting chunked playback data:", msg.payload);
+    this.currentPlaybackData = {
+      ...msg.payload,
+      frames: [],
+      metadata: []
+    };
+    this.playbackIndex = 0;
+    this.expectedChunks = msg.payload.total_chunks;
+    this.receivedChunks = 0;
+  }
+
+  /**
+   * Handle chunked playback data
+   * @param {Object} msg - Message containing chunk data
+   */
+  handlePlaybackDataChunk(msg) {
+    console.log(`Received chunk ${msg.chunk_index}:`, msg.frames.length, "frames");
+    
+    // Add frames and metadata to current playback data
+    this.currentPlaybackData.frames.push(...msg.frames);
+    this.currentPlaybackData.metadata.push(...msg.metadata);
+    this.receivedChunks++;
+    
+    // If this is the last chunk, start playback
+    if (this.receivedChunks >= this.expectedChunks) {
+      console.log("All chunks received, starting playback");
+      this.enterPlaybackMode();
+    }
+  }
+
+  /**
+   * Update the history list UI
+   * @param {Array} runHistory - Array of run data
+   */
+  updateHistoryList(runHistory) {
+    const historyList = document.getElementById("run_history_list");
+    
+    if (runHistory.length === 0) {
+      historyList.innerHTML = '<div class="no-history">No recorded runs yet</div>';
+      return;
+    }
+
+    historyList.innerHTML = runHistory.map((run, index) => {
+      const timestamp = new Date(run.timestamp).toLocaleTimeString();
+      const duration = Math.round(run.duration);
+      return `
+        <div class="history-item" onclick="slateViewer.startPlayback(${run.id})">
+          <div class="history-item-header">
+            <span class="history-item-id">Run ${run.id}</span>
+            <span class="history-item-time">${timestamp}</span>
+          </div>
+          <div class="history-item-stats">
+            <span>${run.total_steps} steps</span>
+            <span>${duration}s</span>
+            <span class="history-item-reward">+${Math.round(run.total_reward)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Start playback of a specific run
+   * @param {number} runId - ID of the run to playback
+   */
+  startPlayback(runId) {
+    console.log("Starting playback of run:", runId);
+    this.socket.emit("playback_run", { run_id: runId });
+  }
+
+  /**
+   * Enter playback mode
+   */
+  enterPlaybackMode() {
+    this.isPlaybackMode = true;
+    this.playbackIndex = 0;
+    
+    // Show playback controls
+    document.getElementById("playback_controls").style.display = "block";
+    
+    // Update mode indicator
+    this.updateModeIndicator('playback-mode', 'Playback Mode');
+    
+    // Disable controls
+    this.setControlsEnabled(false);
+    
+    // Update playback status
+    document.getElementById("playback_status").textContent = 
+      `Playing back Run ${this.currentPlaybackData.id}`;
+    
+    // Start playback
+    this.playPlayback();
+  }
+
+  /**
+   * Exit playback mode and return to live view
+   */
+  exitPlaybackMode() {
+    this.isPlaybackMode = false;
+    this.currentPlaybackData = null;
+    this.playbackIndex = 0;
+    
+    // Stop any ongoing playback
+    if (this.playbackInterval) {
+      clearInterval(this.playbackInterval);
+      this.playbackInterval = null;
+    }
+    
+    // Hide playback controls
+    document.getElementById("playback_controls").style.display = "none";
+    
+    // Update mode indicator
+    this.updateModeIndicator('live-mode', 'Live Mode');
+    
+    // Enable controls
+    this.setControlsEnabled(true);
+    
+    // Reset playback buttons
+    document.getElementById("playback_play").classList.remove("active");
+    document.getElementById("playback_pause").classList.remove("active");
+    document.getElementById("playback_stop").classList.remove("active");
+  }
+
+  /**
+   * Update the mode indicator
+   * @param {string} modeClass - CSS class for the mode
+   * @param {string} modeText - Text to display
+   */
+  updateModeIndicator(modeClass, modeText) {
+    const modeStatus = document.getElementById("mode_status");
+    const modeTextElement = modeStatus.querySelector(".mode-text");
+    
+    modeStatus.className = `mode-status ${modeClass}`;
+    modeTextElement.textContent = modeText;
+  }
+
+  /**
+   * Enable or disable controls
+   * @param {boolean} enabled - Whether to enable controls
+   */
+  setControlsEnabled(enabled) {
+    const controls = [
+      document.getElementById("ckpt_select"),
+      ...document.querySelectorAll(".control-buttons button"),
+      document.querySelector(".save-button")
+    ];
+    
+    controls.forEach(control => {
+      if (control) {
+        control.disabled = !enabled;
+      }
+    });
+  }
+
+  /**
+   * Play the current playback data
+   */
+  playPlayback() {
+    if (!this.currentPlaybackData || this.playbackIndex >= this.currentPlaybackData.frames.length) {
+      this.stopPlayback();
+      return;
+    }
+
+    // Update frame
+    const frameElement = document.getElementById("env_frame");
+    frameElement.src = "data:image/jpeg;base64," + this.currentPlaybackData.frames[this.playbackIndex];
+    
+    // Update info display
+    const metadata = this.currentPlaybackData.metadata[this.playbackIndex];
+    this.updateInfoDisplay({
+      q_values: metadata.q_values,
+      reward: metadata.reward,
+      checkpoint: this.currentPlaybackData.checkpoint
+    });
+
+    // Update score
+    const scoreElement = document.getElementById("score");
+    scoreElement.innerText = Math.round(metadata.reward);
+
+    this.playbackIndex++;
+    
+    // Continue playback
+    this.playbackInterval = setTimeout(() => {
+      this.playPlayback();
+    }, this.playbackSpeed);
+  }
+
+  /**
+   * Pause playback
+   */
+  pausePlayback() {
+    if (this.playbackInterval) {
+      clearInterval(this.playbackInterval);
+      this.playbackInterval = null;
+    }
+  }
+
+  /**
+   * Stop playback
+   */
+  stopPlayback() {
+    this.pausePlayback();
+    this.playbackIndex = 0;
+    document.getElementById("playback_play").classList.remove("active");
+    document.getElementById("playback_pause").classList.remove("active");
+    document.getElementById("playback_stop").classList.add("active");
   }
 
   /**
@@ -250,4 +516,27 @@ function onSelectCheckpoint(element) {
 // Initialize the application when the page loads
 document.addEventListener('DOMContentLoaded', () => {
   slateViewer = new SlateViewer();
+  
+  // Add playback control event listeners
+  document.getElementById('back_to_live').addEventListener('click', () => {
+    slateViewer.exitPlaybackMode();
+  });
+  
+  document.getElementById('playback_play').addEventListener('click', () => {
+    slateViewer.playPlayback();
+    document.getElementById('playback_play').classList.add('active');
+    document.getElementById('playback_pause').classList.remove('active');
+    document.getElementById('playback_stop').classList.remove('active');
+  });
+  
+  document.getElementById('playback_pause').addEventListener('click', () => {
+    slateViewer.pausePlayback();
+    document.getElementById('playback_play').classList.remove('active');
+    document.getElementById('playback_pause').classList.add('active');
+    document.getElementById('playback_stop').classList.remove('active');
+  });
+  
+  document.getElementById('playback_stop').addEventListener('click', () => {
+    slateViewer.stopPlayback();
+  });
 });
