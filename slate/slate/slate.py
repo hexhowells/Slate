@@ -6,6 +6,8 @@ import websockets
 import threading
 import os
 import numpy as np
+import time
+from datetime import datetime
 from .agent import Agent
 
 
@@ -58,6 +60,11 @@ class SlateClient:
         self.checkpoints: list[str] = []
         self._rescan_checkpoints()
         self.checkpoint = (self.checkpoints[-1] if self.checkpoints else None) or ""
+        
+        # Recording functionality
+        self.current_recording: list[dict] = []
+        self.is_recording = False
+        self.run_start_time = None
     
 
     def init(
@@ -91,6 +98,74 @@ class SlateClient:
         )
 
 
+    def start_recording(self) -> None:
+        """
+        Start recording a new run session.
+        """
+        self.is_recording = True
+        self.current_recording = []
+        self.run_start_time = datetime.now()
+
+
+    async def stop_recording(self) -> None:
+        """
+        Stop recording and send the current recording to the server.
+        """
+        if not self.is_recording or not self.current_recording:
+            return
+            
+        self.is_recording = False
+        
+        # Create run summary
+        run_data = {
+            "id": len(self.current_recording),  # Will be updated by server
+            "timestamp": self.run_start_time.isoformat(),
+            "duration": (datetime.now() - self.run_start_time).total_seconds(),
+            "total_steps": len(self.current_recording),
+            "total_reward": sum(step["metadata"].get("reward", 0) for step in self.current_recording),
+            "checkpoint": self.checkpoint,
+            "frames": [step["frame"] for step in self.current_recording],
+            "metadata": [step["metadata"] for step in self.current_recording]
+        }
+        
+        # Send to server via websocket
+        await self.websocket.send(json.dumps({
+            "type": "run_completed",
+            "payload": run_data
+        }))
+        
+        # Clear current recording
+        self.current_recording = []
+        self.run_start_time = None
+
+
+    def record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
+        """
+        Record a single step in the current recording.
+        
+        Args:
+            frame: Base64-encoded frame
+            reward: Step reward
+            done: Whether episode is done
+            info: Environment info
+            q_values: Q-values from agent
+        """
+        if not self.is_recording:
+            return
+            
+        step_data = {
+            "frame": frame,
+            "metadata": {
+                "reward": reward,
+                "done": done,
+                "info": info,
+                "q_values": q_values,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        self.current_recording.append(step_data)
+
+
     def encode_frame(self, frame: np.ndarray) -> str:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
@@ -105,7 +180,7 @@ class SlateClient:
         return base64.b64encode(img).decode('utf-8')
 
 
-    def run_step(self) -> None:
+    async def run_step(self) -> None:
         """
         Execute a single step in the environment using the agent or random policy,
         and update internal state values.
@@ -113,9 +188,9 @@ class SlateClient:
         Raises:
             Any exception from the environment or rendering is propagated
         """
-        action = self.agent.get_action(self.env) if self.agent else self.env.action_space.sample()
-        obs, reward, done, truncated, info = self.env.step(action)
         frame = self.env.render()
+        action = self.agent.get_action(frame) if self.agent else self.env.action_space.sample()
+        obs, reward, done, truncated, info = self.env.step(action)
 
         with self.state_lock:
             self.current_frame = self.encode_frame(frame)
@@ -124,10 +199,15 @@ class SlateClient:
             self.info = info
             self.q_values = getattr(self.agent, "get_q_values", lambda x: [])(obs)
             self.high_score = max(self.high_score, reward)
+            
+            # Record the step if recording is active
+            self.record_step(self.current_frame, reward, done, info, self.q_values)
 
         if done:
             self.env.reset()
             self.running = False
+            # Stop recording when episode ends (game over)
+            await self.stop_recording()
 
 
     async def send_state(self) -> None:
@@ -195,7 +275,7 @@ class SlateClient:
         to the WebSocket server as long as `self.running` is True.
         """
         while self.running:
-            self.run_step()
+            await self.run_step()
             await self.send_state()
             await asyncio.sleep(self.frame_rate)
 
@@ -227,15 +307,17 @@ class SlateClient:
 
                 match command:
                     case "step":
-                        self.run_step()
+                        await self.run_step()
                         await self.send_state()
                     case "run":
                         self.running = True
+                        self.start_recording()
                         if not self.loop_task or self.loop_task.done():
                             self.loop_task = asyncio.create_task(self.run_loop())
                     case "pause":
                         self.running = False
                     case "reset":
+                        await self.stop_recording()
                         self.env.reset()
                         self.running = False
                         await self.send_state()

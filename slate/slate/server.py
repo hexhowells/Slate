@@ -31,6 +31,11 @@ ML_WS_PORT = 8765
 ml_loop = asyncio.new_event_loop()
 ml_clients: set[asyncio.Future] = set()
 
+# Server-side run history storage
+MAX_HISTORY_SIZE = 5
+run_history: list[dict] = []
+run_data_storage: dict[int, dict] = {}  # Store full run data separately
+
 
 @app.route("/")
 def index():
@@ -58,7 +63,13 @@ async def ml_handler(ws) -> None:
         async for msg in ws:
             data = json.loads(msg)
             evt = data.get("type", "frame_update")
-            socketio.emit(evt, data)
+            
+            # Handle special case for completed runs
+            if evt == "run_completed":
+                run_data = data.get("payload", {})
+                add_run_to_history(run_data)
+            else:
+                socketio.emit(evt, data)
     finally:
         ml_clients.discard(ws)
 
@@ -91,6 +102,54 @@ def _send_to_ml(payload: dict) -> None:
     txt = json.dumps(payload)
     for ws in list(ml_clients):
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
+
+
+def add_run_to_history(run_data: dict) -> None:
+    """Add a completed run to the server-side history.
+    
+    Args:
+        run_data: Dictionary containing run information and frames
+    """
+    global run_history, run_data_storage
+    
+    # Assign server-side ID
+    run_id = len(run_history)
+    run_data["id"] = run_id
+    
+    # Store full data separately (including frames)
+    run_data_storage[run_id] = run_data
+    
+    # Create metadata-only version for history list
+    run_metadata = {
+        "id": run_id,
+        "timestamp": run_data["timestamp"],
+        "duration": run_data["duration"],
+        "total_steps": run_data["total_steps"],
+        "total_reward": run_data["total_reward"],
+        "checkpoint": run_data["checkpoint"]
+    }
+    
+    # Add to history
+    run_history.append(run_metadata)
+    
+    # Maintain max history size
+    if len(run_history) > MAX_HISTORY_SIZE:
+        old_run = run_history.pop(0)
+        # Clean up stored data for removed run
+        if old_run["id"] in run_data_storage:
+            del run_data_storage[old_run["id"]]
+    
+    # Broadcast updated history to all connected clients
+    socketio.emit("run_history_update", {"run_history": run_history})
+
+
+def get_run_history() -> list[dict]:
+    """Get the current run history.
+    
+    Returns:
+        List of run data dictionaries
+    """
+    return run_history
 
 
 @socketio.on("step")
@@ -131,6 +190,65 @@ def on_select_checkpoint(data) -> None:
 def on_send_checkpoints() -> None:
     """Request the list of available checkpoints from the ML runtime."""
     _send_to_ml({"type": "send_checkpoints"})
+
+
+@socketio.on("send_run_history")
+def on_send_run_history() -> None:
+    """Request the run history from the ML runtime."""
+    _send_to_ml({"type": "send_run_history"})
+
+
+@socketio.on("playback_run")
+def on_playback_run(data) -> None:
+    """Send playback data for a specific run directly to the requesting client.
+    Uses chunked transfer for large runs to avoid WebSocket size limits.
+    
+    Args:
+        data: Dict containing a `run_id` key with the run identifier.
+    """
+    run_id = data.get("run_id", 0)
+    if run_id in run_data_storage:
+        run_data = run_data_storage[run_id]
+        
+        # Check if data is too large (estimate > 500KB)
+        estimated_size = len(str(run_data))
+        if estimated_size > 500000:  # 500KB threshold
+            # Send in chunks
+            frames = run_data.get("frames", [])
+            metadata = run_data.get("metadata", [])
+            
+            # Send run info first
+            run_info = {
+                "id": run_data["id"],
+                "timestamp": run_data["timestamp"],
+                "duration": run_data["duration"],
+                "total_steps": run_data["total_steps"],
+                "total_reward": run_data["total_reward"],
+                "checkpoint": run_data["checkpoint"],
+                "chunked": True,
+                "total_chunks": len(frames)
+            }
+            socketio.emit("playback_data_start", {"payload": run_info})
+            
+            # Send frames in chunks
+            chunk_size = 10  # Send 10 frames per chunk
+            for i in range(0, len(frames), chunk_size):
+                chunk_frames = frames[i:i+chunk_size]
+                chunk_metadata = metadata[i:i+chunk_size]
+                socketio.emit("playback_data_chunk", {
+                    "chunk_index": i // chunk_size,
+                    "frames": chunk_frames,
+                    "metadata": chunk_metadata
+                })
+        else:
+            # Send normally for smaller runs
+            socketio.emit("playback_data", {"payload": run_data})
+
+
+@socketio.on("get_run_history")
+def on_get_run_history() -> None:
+    """Send current run history to the requesting client."""
+    socketio.emit("run_history_update", {"run_history": get_run_history()})
 
 
 def start_local_server(
