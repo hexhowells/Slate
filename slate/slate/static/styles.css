@@ -74,18 +74,34 @@ header h1 {
 
 /* Main Viewer Layout */
 .viewer {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 300px 1fr 300px;
   gap: 2rem;
+  align-items: flex-start;
+}
+
+/* History Panel */
+.history-panel {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(221, 221, 221, 0.3);
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  height: fit-content;
 }
 
 /* Frame Wrapper */
 .frame-wrapper {
-  flex: 1;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
 }
 
 /* Frame Container */
@@ -138,6 +154,46 @@ header h1 {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  height: fit-content;
+}
+
+/* Mode Indicator */
+.mode-indicator {
+  margin-bottom: 0.5rem;
+}
+
+.mode-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.mode-status.live-mode {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border: 1px solid #b8dacc;
+  color: #155724;
+}
+
+.mode-status.playback-mode {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+  border: 1px solid #ffc107;
+  color: #856404;
+}
+
+.mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #28a745;
+}
+
+.mode-status.playback-mode .mode-dot {
+  background-color: #ffc107;
 }
 
 /* Dropdowns */
@@ -201,6 +257,28 @@ button:hover {
 button:active {
   transform: translateY(0);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Disabled states */
+select:disabled {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button:disabled {
+  background: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button:disabled:hover {
+  background: #f8f9fa;
+  border-color: #e0e0e0;
+  transform: none;
+  box-shadow: none;
 }
 
 /* Info Panel */
@@ -273,9 +351,9 @@ button:active {
 }
 
 .history-list {
-  max-height: 200px;
   overflow-y: auto;
   margin-bottom: 1rem;
+  flex: 1;
 }
 
 .no-history {
@@ -341,7 +419,8 @@ button:active {
   border: 1px solid #ffc107;
   border-radius: 8px;
   padding: 0.75rem;
-  margin-top: 0.5rem;
+  width: 100%;
+  max-width: 520px;
 }
 
 .playback-info {
@@ -407,6 +486,7 @@ button:active {
     gap: 2rem;
   }
   
+  .history-panel,
   .controls {
     min-width: auto;
   }
