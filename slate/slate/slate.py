@@ -73,7 +73,7 @@ class SlateClient:
             run_local: bool = False,
         ) -> None:
         """
-        Inititliase the client with user-defined parameters
+        Initialise the client with user-defined parameters
 
         Args:
             endpoint: the server endpoint that the client with connect to
