@@ -113,6 +113,8 @@ class SlateClient:
         """
         if not self.is_recording or not self.current_recording:
             return
+        
+        assert self.run_start_time is not None, "run_start_time timestamp variable is None"
             
         self.is_recording = False
         
