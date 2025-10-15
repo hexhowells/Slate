@@ -9,7 +9,8 @@ setup(
         'Flask>=2.0',
         'gym>=0.21.0',
         'opencv-python>=4.5.0',
-        'numpy>=1.18.0'
+        'numpy>=1.18.0',
+		'websockets>=15.0.1'
     ],
     entry_points={
         'console_scripts': [
