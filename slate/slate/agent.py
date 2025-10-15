@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import torch
 
 
 class Agent(ABC):
 	@abstractmethod
-	def get_action(self, frame: np.ndarray) -> int:
+	def get_action(self, frame: np.ndarray|torch.Tensor) -> int:
 		"""
 		Get next action given current frame
 
