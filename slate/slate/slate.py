@@ -6,9 +6,10 @@ import websockets
 import threading
 import os
 import numpy as np
-import time
+from collections import deque
 from datetime import datetime
 from .agent import Agent
+from .utils import FrameBuffer
 
 
 class SlateClient:
@@ -20,6 +21,8 @@ class SlateClient:
         env: A Gym-like environment that supports reset, step, and render methods
         agent: Agent with get_action(env) and optionally get_q_values(obs)
         frame_rate: Delay (in seconds) between steps during continuous run
+        buffer_len: Length of the frame buffer (detault = 1)
+        transform: Optional transform function to transform the input frames
         checkpoints_dir: the directory which the agent checkpoints are stored
 
     Attributes:
@@ -35,7 +38,9 @@ class SlateClient:
             self, 
             env, 
             agent: Agent, 
-            frame_rate: float=0.1, 
+            frame_rate: float=0.1,
+            buffer_len: int=1,
+            transform=lambda x: x,
             checkpoints_dir: str|None=None
         ) -> None:
         self.env = env
@@ -47,7 +52,7 @@ class SlateClient:
         self.loop_task = None
         self.url_endpoint = "ws://localhost:8765"
 
-        self.env.reset()
+        obs, _ = self.env.reset()
         self.current_frame = None
         self.q_values = []
         self.reward = 0
@@ -65,7 +70,10 @@ class SlateClient:
         self.current_recording: list[dict] = []
         self.is_recording = False
         self.run_start_time = None
-    
+
+        # frame buffer
+        self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
+        
 
     def init(
             self, 
@@ -191,8 +199,9 @@ class SlateClient:
             Any exception from the environment or rendering is propagated
         """
         frame = self.env.render()
-        action = self.agent.get_action(frame) if self.agent else self.env.action_space.sample()
+        action = self.agent.get_action(self.frame_buffer.state())
         obs, reward, done, truncated, info = self.env.step(action)
+        self.frame_buffer.append(obs)
 
         with self.state_lock:
             self.current_frame = self.encode_frame(frame)
@@ -320,7 +329,8 @@ class SlateClient:
                         self.running = False
                     case "reset":
                         await self.stop_recording()
-                        self.env.reset()
+                        obs, _ = self.env.reset()
+                        self.frame_buffer.reset(obs)
                         self.running = False
                         await self.send_state()
                     case "select_checkpoint":
