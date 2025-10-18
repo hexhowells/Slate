@@ -344,6 +344,7 @@ class SlateClient:
                         await self.send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
+                        self.agent.load_checkpoint(self.checkpoint)
                         await self.send_state()
                     case "send_checkpoints":
                         await self._send_checkpoints()
