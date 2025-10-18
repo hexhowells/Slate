@@ -9,13 +9,14 @@ from slate import Agent
 class RandomAgent(Agent):
     def __init__(self, env):
         self.env = env
+        
     def get_action(self, frame):
         return self.env.action_space.sample()
     
     def load_checkpoint(self, checkpoint: str) -> None:
         return super().load_checkpoint(checkpoint)
 
-    def get_q_values(self, obs):
+    def get_q_values(self):
         return np.random.rand(env.action_space.n).tolist()
 
 
@@ -28,7 +29,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--server",
-        default="ws://localhost:8765",
+        default="localhost",
         help="Slate server websocket URL",
     )
     args = parser.parse_args()
@@ -36,6 +37,6 @@ if __name__ == "__main__":
     env = gym.make("ALE/Breakout-v5", render_mode="rgb_array")
     agent = RandomAgent(env)
     runner = SlateClient(env, agent, checkpoints_dir=args.ckpt_dir)
-    runner.init(endpoint=args.server)
+    runner.init(endpoint=args.server, run_local=True)
     runner.start_client()
 

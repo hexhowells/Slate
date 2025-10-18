@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import torch
 
 
 class Agent(ABC):
 	@abstractmethod
-	def get_action(self, frame: np.ndarray) -> int:
+	def get_action(self, frame: np.ndarray|torch.Tensor) -> int:
 		"""
 		Get next action given current frame
 
@@ -24,5 +25,13 @@ class Agent(ABC):
 
 		Args:
 			checkpoint: the filepath to load the checkpoint from
+		"""
+		pass
+	
+
+	@abstractmethod
+	def get_q_values(self) -> list|torch.Tensor:
+		"""
+		Gets the models current q-values from the previously processed frame
 		"""
 		pass
