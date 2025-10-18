@@ -276,6 +276,7 @@ class SlateViewer {
     const metadata = this.currentPlaybackData.metadata[this.playbackIndex];
     this.updateInfoDisplay({
       q_values: metadata.q_values,
+      action: metadata.action,
       reward: metadata.reward,
       checkpoint: this.currentPlaybackData.checkpoint
     });
@@ -321,7 +322,7 @@ class SlateViewer {
     const qvals = payload.q_values.map((v) => Number(v).toFixed(2));
     document.getElementById("info").innerHTML = `
       <div>Q-values: [${qvals.join(", ")}]</div>
-      <div>Action: [auto]</div>
+      <div>Action: ${payload.action}</div>
       <div>Reward: +${payload.reward}</div>
       <div>Checkpoint: ${payload.checkpoint}</div>
     `;
