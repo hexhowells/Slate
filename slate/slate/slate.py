@@ -57,7 +57,8 @@ class SlateClient:
         self.step_mode = False
         self.state_lock = threading.Lock()
         self.loop_task = None
-        self.url_endpoint = "ws://localhost:8765"
+        self.ws_endpoint = "ws://localhost:8765"
+        self.ui_endpoint = "127.0.0.1"
 
         obs, _ = self.env.reset()
         self.current_frame = None
@@ -94,10 +95,11 @@ class SlateClient:
             endpoint: the server endpoint that the client with connect to
             run_local: whether to run the slate server locally or connect to a cloud server
         """
-        self.url_endpoint = endpoint or self.url_endpoint
-        if run_local:
-            self.run_local = run_local
-            self.url_endpoint = "ws://127.0.0.1:8765"
+        if endpoint:
+            self.ui_endpoint = endpoint
+            #self.ws_endpoint = endpoint
+        
+        self.run_local = run_local
 
 
     def _rescan_checkpoints(self) -> None:
@@ -375,10 +377,10 @@ class SlateClient:
         if self.run_local:
             try:
                 from .server import start_local_server
-                # Start local dashboard on 127.0.0.1:8000 and ML WS bridge on 127.0.0.1:8765
-                start_local_server(host=self.url_endpoint, port=8000)
-                print(f"\033[95m[Slate] Open dashboard at http://{self.url_endpoint}:8000\033[0m")
+                # Start local dashboard on ui_endpoint:8000 and ML WS bridge  ws_endpoint:8765
+                start_local_server(host=self.ui_endpoint, port=8000)
+                print(f"\033[95m[Slate] Open dashboard at http://{self.ui_endpoint}:8000\033[0m")
             except Exception as e:
                 print(f"[Slate] Failed to start local server: {e}")
-        asyncio.run(self._dial_and_serve(self.url_endpoint))
+        asyncio.run(self._dial_and_serve(self.ws_endpoint))
     

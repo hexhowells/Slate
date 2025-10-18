@@ -29,7 +29,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--server",
-        default="ws://localhost:8765",
+        default="localhost",
         help="Slate server websocket URL",
     )
     args = parser.parse_args()
