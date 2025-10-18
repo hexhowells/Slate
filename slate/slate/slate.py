@@ -63,6 +63,8 @@ class SlateClient:
         obs, _ = self.env.reset()
         self.current_frame = None
         self.q_values = []
+        self.action_str = "None"
+        self.action_meanings = env.unwrapped.get_action_meanings()
         self.reward = 0
         self.done = False
         self.info = {}
@@ -179,6 +181,7 @@ class SlateClient:
                 "done": done,
                 "info": info,
                 "q_values": q_values,
+                "action": self.action_str,
                 "timestamp": datetime.now().isoformat()
             }
         }
@@ -211,6 +214,8 @@ class SlateClient:
         action = self.agent.get_action(self.frame_buffer.state())
         obs, reward, done, truncated, info = self.env.step(action)
         self.frame_buffer.append(obs)
+
+        self.action_str = self.action_meanings[action]
 
         with self.state_lock:
             self.current_frame = self.encode_frame(frame)
@@ -247,6 +252,7 @@ class SlateClient:
                     "done": self.done,
                     "info": self.info,
                     "q_values": self.q_values,
+                    "action": self.action_str,
                     "high_score": self.high_score,
                     "checkpoint": self.checkpoint
                 }
