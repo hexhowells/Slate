@@ -48,7 +48,7 @@ class SlateClient:
             frame_rate: float=0.1,
             buffer_len: int=1,
             transform=default_transform,
-            checkpoints_dir: str|None=None
+            checkpoints_dir: str = ""
         ) -> None:
         self.env = env
         self.agent = agent
@@ -344,7 +344,7 @@ class SlateClient:
                         await self.send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
-                        self.agent.load_checkpoint(self.checkpoint)
+                        self.agent.load_checkpoint(os.path.join(self.ckpt_dir, self.checkpoint))
                         await self.send_state()
                     case "send_checkpoints":
                         await self._send_checkpoints()
