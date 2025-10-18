@@ -360,44 +360,18 @@ class SlateClient:
                 await asyncio.sleep(1)
 
 
-    def start_client(self):
+    def start_client(self) -> None:
         """
-        Start the client. In a notebook (where an asyncio loop is already running),
-        schedule the client on the existing loop and return the task so the cell
-        doesn't block. In a regular script, block with asyncio.run(...).
+        Start the client and block the main thread to handle interaction with the WebSocket server.
         """
+        # If configured to run locally, start the embedded server and point endpoint to localhost
         if self.run_local:
             try:
                 from .server import start_local_server
-                threading.Thread(
-                    target=start_local_server,
-                    kwargs={"host": "127.0.0.1", "port": 8000},
-                    daemon=True,
-                ).start()
-                print("\033[95m[Slate] Open dashboard at http://127.0.0.1:8000\033[0m")
+                # Start local dashboard on 127.0.0.1:8000 and ML WS bridge on 127.0.0.1:8765
+                start_local_server(host="127.0.0.1", port=8000)
+                print(f"\033[95m[Slate] Open dashboard at http://127.0.0.1:8000\033[0m")
             except Exception as e:
                 print(f"[Slate] Failed to start local server: {e}")
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            self._client_task = loop.create_task(self._dial_and_serve(self.url_endpoint))
-            print("[SlateRunner] client started on existing event loop (notebook).")
-            return self._client_task
-        else:
-            asyncio.run(self._dial_and_serve(self.url_endpoint))
-
-
-    def stop_client(self):
-        """
-        Stop the client task if it was started on an existing loop (e.g., Jupyter).
-        Also ensures the run loop halts.
-        """
-        self.running = False
-        task = getattr(self, "_client_task", None)
-        if task and not task.done():
-            task.cancel()
-            print("[SlateRunner] client task cancelled.")
+        asyncio.run(self._dial_and_serve(self.url_endpoint))
+    
