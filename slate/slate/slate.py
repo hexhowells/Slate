@@ -6,10 +6,17 @@ import websockets
 import threading
 import os
 import numpy as np
-from collections import deque
+import torchvision.transforms as T
 from datetime import datetime
+
 from .agent import Agent
 from .utils import FrameBuffer
+
+
+default_transform = transform = T.Compose([
+	T.ToPILImage(),
+	T.ToTensor()
+])
 
 
 class SlateClient:
@@ -40,7 +47,7 @@ class SlateClient:
             agent: Agent, 
             frame_rate: float=0.1,
             buffer_len: int=1,
-            transform=lambda x: x,
+            transform=default_transform,
             checkpoints_dir: str|None=None
         ) -> None:
         self.env = env
