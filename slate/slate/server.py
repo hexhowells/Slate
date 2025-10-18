@@ -74,21 +74,24 @@ async def ml_handler(ws) -> None:
         ml_clients.discard(ws)
 
 
-async def ml_server() -> None:
+async def ml_server(ml_host: str = "127.0.0.1") -> None:
     """Start the ML WebSocket server and wait indefinitely.
 
     The server listens on 127.0.0.1 at `ML_WS_PORT` and spawns `ml_handler`
     for each incoming connection.
+
+    Args:
+        ml_host: the HTTP web host of the websocket
     """
-    async with websockets.serve(ml_handler, "127.0.0.1", ML_WS_PORT):
-        print(f"[Slate] waiting for ML on ws://127.0.0.1:{ML_WS_PORT}")
+    async with websockets.serve(ml_handler, ml_host, ML_WS_PORT):
+        print(f"[Slate] waiting for ML on ws://{ml_host}:{ML_WS_PORT}")
         await asyncio.Future()
 
 
-def _run_ml_loop() -> None:
+def _run_ml_loop(ml_host: str) -> None:
     """Run the ML WebSocket server inside a dedicated asyncio event loop."""
     asyncio.set_event_loop(ml_loop)
-    ml_loop.run_until_complete(ml_server())
+    ml_loop.run_until_complete(ml_server(ml_host))
 
 
 def _send_to_ml(payload: dict) -> None:
@@ -252,18 +255,20 @@ def on_get_run_history() -> None:
 
 
 def start_local_server(
-        host: str="127.0.0.1", 
-        port: int=8000
-        ) -> None:
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        ml_host: str = "0.0.0.0",
+    ) -> None:
     """
     Start the local Slate dashboard server and the ML WebSocket bridge in background threads.
 
     Args:
         host: HTTP host for the dashboard.
         port: HTTP port for the dashboard.
+        ml_host: HTTP host for ML websocket
     """
     # Start ML websocket bridge in background
-    threading.Thread(target=_run_ml_loop, name="slate-ml-ws", daemon=True).start()
+    threading.Thread(target=lambda: _run_ml_loop(ml_host), name="slate-ml-ws", daemon=True).start()
 
     # Start Flask-SocketIO web server in background
     threading.Thread(
