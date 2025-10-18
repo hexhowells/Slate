@@ -16,7 +16,7 @@ class RandomAgent(Agent):
     def load_checkpoint(self, checkpoint: str) -> None:
         return super().load_checkpoint(checkpoint)
 
-    def get_q_values(self, obs):
+    def get_q_values(self):
         return np.random.rand(env.action_space.n).tolist()
 
 

@@ -27,3 +27,11 @@ class Agent(ABC):
 			checkpoint: the filepath to load the checkpoint from
 		"""
 		pass
+	
+
+	@abstractmethod
+	def get_q_values(self) -> list|torch.Tensor:
+		"""
+		Gets the models current q-values from the previously processed frame
+		"""
+		pass

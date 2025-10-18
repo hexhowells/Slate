@@ -217,7 +217,7 @@ class SlateClient:
             self.reward = reward
             self.done = done
             self.info = info
-            self.q_values = getattr(self.agent, "get_q_values", lambda x: [])(obs)
+            self.q_values = self.agent.get_q_values()
             self.high_score = max(self.high_score, reward)
             
             # Record the step if recording is active
