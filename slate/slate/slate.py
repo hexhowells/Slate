@@ -376,8 +376,8 @@ class SlateClient:
             try:
                 from .server import start_local_server
                 # Start local dashboard on 127.0.0.1:8000 and ML WS bridge on 127.0.0.1:8765
-                start_local_server(host="127.0.0.1", port=8000)
-                print(f"\033[95m[Slate] Open dashboard at http://127.0.0.1:8000\033[0m")
+                start_local_server(host=self.url_endpoint, port=8000)
+                print(f"\033[95m[Slate] Open dashboard at http://{self.url_endpoint}:8000\033[0m")
             except Exception as e:
                 print(f"[Slate] Failed to start local server: {e}")
         asyncio.run(self._dial_and_serve(self.url_endpoint))
