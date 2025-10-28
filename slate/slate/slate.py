@@ -80,6 +80,7 @@ class SlateClient:
         self.current_recording: list[dict] = []
         self.is_recording = False
         self.run_start_time = None
+        self.start_recording()
 
         # frame buffer
         self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
@@ -221,6 +222,7 @@ class SlateClient:
             self.current_frame = self.encode_frame(frame)
             self.reward = reward
             self.done = done
+            
             self.info = info
             self.q_values = self.agent.get_q_values()
             self.high_score = max(self.high_score, reward)
@@ -229,11 +231,11 @@ class SlateClient:
             self.record_step(self.current_frame, reward, done, info, self.q_values)
 
         if done:
+            await self.stop_recording()
             self.env.reset()
             self.running = False
-            # Stop recording when episode ends (game over)
-            await self.stop_recording()
-
+            self.start_recording()
+            
 
     async def send_state(self) -> None:
         """
@@ -337,13 +339,13 @@ class SlateClient:
                         await self.send_state()
                     case "run":
                         self.running = True
-                        self.start_recording()
                         if not self.loop_task or self.loop_task.done():
                             self.loop_task = asyncio.create_task(self.run_loop())
                     case "pause":
                         self.running = False
                     case "reset":
                         await self.stop_recording()
+                        self.start_recording()
                         obs, _ = self.env.reset()
                         self.frame_buffer.reset(obs)
                         self.running = False
