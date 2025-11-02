@@ -62,14 +62,17 @@ async def ml_handler(ws) -> None:
     try:
         async for msg in ws:
             data = json.loads(msg)
-            evt = data.get("type", "frame_update")
+            msg_type = data.get("type", None)
             
-            # Handle special case for completed runs
-            if evt == "run_completed":
-                run_data = data.get("payload", {})
-                add_run_to_history(run_data)
-            else:
-                socketio.emit(evt, data)
+            match msg_type:
+                case "frame_update":
+                    socketio.emit(msg_type, data)
+                case "run_completed":
+                    run_data = data.get("payload", {})
+                    add_run_to_history(run_data)
+                case _:
+                    print(f"ML Websocket received unknown message type: {msg_type}, ignoring")
+                
     finally:
         ml_clients.discard(ws)
 
@@ -86,25 +89,6 @@ async def ml_server(ml_host: str = "127.0.0.1") -> None:
     async with websockets.serve(ml_handler, ml_host, ML_WS_PORT):
         print(f"[Slate] waiting for ML on ws://{ml_host}:{ML_WS_PORT}")
         await asyncio.Future()
-
-
-def _run_ml_loop(ml_host: str) -> None:
-    """Run the ML WebSocket server inside a dedicated asyncio event loop."""
-    asyncio.set_event_loop(ml_loop)
-    ml_loop.run_until_complete(ml_server(ml_host))
-
-
-def _send_to_ml(payload: dict) -> None:
-    """Send a JSON payload to all connected ML runtime WebSocket clients.
-
-    Args:
-        payload: Dictionary that will be JSON-encoded and sent.
-    """
-    if not ml_clients:
-        return
-    txt = json.dumps(payload)
-    for ws in list(ml_clients):
-        asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
 def add_run_to_history(run_data: dict) -> None:
@@ -144,6 +128,19 @@ def add_run_to_history(run_data: dict) -> None:
     
     # Broadcast updated history to all connected clients
     socketio.emit("run_history_update", {"run_history": run_history})
+
+
+def _send_to_ml(payload: dict) -> None:
+    """Send a JSON payload to all connected ML runtime WebSocket clients.
+
+    Args:
+        payload: Dictionary that will be JSON-encoded and sent.
+    """
+    if not ml_clients:
+        return
+    txt = json.dumps(payload)
+    for ws in list(ml_clients):
+        asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
 @socketio.on("step")
@@ -243,6 +240,12 @@ def on_playback_run(data) -> None:
 def on_get_run_history() -> None:
     """Send current run history to the requesting client."""
     socketio.emit("run_history_update", {"run_history": run_history})
+
+
+def _run_ml_loop(ml_host: str) -> None:
+    """Run the ML WebSocket server inside a dedicated asyncio event loop."""
+    asyncio.set_event_loop(ml_loop)
+    ml_loop.run_until_complete(ml_server(ml_host))
 
 
 def start_local_server(
