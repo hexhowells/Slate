@@ -1,0 +1,143 @@
+from collections import deque
+from datetime import datetime
+from slate.schemas import FramePayload
+import uuid
+
+
+"""
+recording contains data on:
+    datetime
+    recording buffer
+    current checkpoint
+"""
+class RunHistory:
+    def __init__(self, max_history_size: int=5) -> None:
+        """
+        Args:
+            max_history_size: maximum number of records in the history buffer
+        """
+        self.max_history_size = max_history_size
+        self.run_history = deque(maxlen=max_history_size)
+        self.current_recording = None
+        self.recording_ids = []
+        self.recording_num = 1
+    
+
+    @property
+    def recording(self):
+        return self.current_recording != None
+    
+
+    def check_id(self, uuid):
+        return uuid in self.recording_ids
+    
+
+    def fetch_recording(self, uuid):
+        print(uuid)
+        return self.run_history[(uuid-1) % self.max_history_size]
+    
+
+    def new_recording(self, data):
+        self.current_recording = Recording(self.recording_num, data)
+        self.recording_ids.append(self.recording_num)
+        self.recording_num += 1
+
+
+    def update_recording(self, data):
+        assert self.current_recording, "Cannot call update_recording - No current recording setup in RunHistory"
+        self.current_recording.add_frame(data)
+
+
+    def stop_recording(self):
+        assert self.current_recording, "Cannot call stopc_recording - No current recording setup in RunHistory"
+        self.run_history.append(self.current_recording.get_recording())
+        self.current_recording = None
+
+    
+    def get_run_history(self):
+        return list(self.run_history)
+
+
+class Recording:
+    def __init__(self, uuid, data):
+        self.run_start_time = datetime.now()
+        self.checkpoint = data['checkpoint']
+        self.frames = []
+        self.total_reward = 0.0
+        self.run_id = uuid
+        self.metadata = []
+
+        self.add_frame(data)
+    
+
+    def add_frame(self, data):
+        self.frames.append(data['frame'])
+        self.total_reward += max(0, data['reward'])
+        self.metadata.append({
+            'reward': data['reward'],
+            'done': data['done'],
+            'info': data['info'],
+            'q_values': data['q_values'],
+            'action': data['action'],
+            'timestep': datetime.now().isoformat()
+        })
+
+
+    def get_recording(self):
+        return {
+            'id': self.run_id,
+            'timestamp': self.run_start_time.isoformat(),
+            'duration': (datetime.now() - self.run_start_time).total_seconds(),
+            'total_steps': len(self.frames),
+            'total_reward': self.total_reward,
+            'checkpoint': self.checkpoint,
+            'frames': self.frames,
+            'metadata': self.metadata
+        }
+
+
+
+
+
+"""
+{'type': 'frame_update', 
+'payload': {
+'frame': '/j/AOEZrRX7Ff8Mm9k=', 
+'reward': 0.0, 
+'done': False, 
+'info': {
+    'lives': 5, 
+    'episode_frame_number': 40, 
+    'frame_number': 40
+    }, 
+'q_values': [0.8844823904153407, 0.7050029850419859, 0.7172719775130212, 0.02144657426774299], 
+'action': 'NOOP', 
+'high_score': 0, 
+'checkpoint': 'model_2.pth'}
+}
+
+"""
+
+"""
+run_data = {
+            "id": len(self.current_recording),  # Will be updated by server
+            "timestamp": self.run_start_time.isoformat(),
+            "duration": (datetime.now() - self.run_start_time).total_seconds(),
+            "total_steps": len(self.current_recording),
+            "total_reward": sum(step["metadata"].get("reward", 0) for step in self.current_recording),
+            "checkpoint": self.checkpoint,
+            "frames": [step["frame"] for step in self.current_recording],
+            "metadata": [step["metadata"] for step in self.current_recording]
+        }
+"""
+
+"""
+"metadata": {
+                "reward": reward,
+                "done": done,
+                "info": info,
+                "q_values": q_values,
+                "action": self.action_str,
+                "timestamp": datetime.now().isoformat()
+            }
+"""
