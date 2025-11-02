@@ -37,6 +37,7 @@ run_history: list[dict] = []
 run_data_storage: dict[int, dict] = {}  # Store full run data separately
 
 
+
 @app.route("/")
 def index():
     """Serve the dashboard and request the latest checkpoints from the ML side.
@@ -65,7 +66,7 @@ async def ml_handler(ws) -> None:
             msg_type = data.get("type", None)
             
             match msg_type:
-                case "frame_update":
+                case "frame_update" | "checkpoints_update":
                     socketio.emit(msg_type, data)
                 case "run_completed":
                     run_data = data.get("payload", {})
