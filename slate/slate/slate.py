@@ -27,6 +27,8 @@ class SlateClient:
     Args:
         env: A Gym-like environment that supports reset, step, and render methods
         agent: Agent with get_action(env) and optionally get_q_values(obs)
+        endpoint: the server endpoint that the client with connect to
+        run_local: whether to run the slate server locally or connect to a cloud server
         frame_rate: Delay (in seconds) between steps during continuous run
         buffer_len: Length of the frame buffer (detault = 1)
         transform: Optional transform function to transform the input frames
@@ -44,7 +46,9 @@ class SlateClient:
     def __init__(
             self, 
             env, 
-            agent: Agent, 
+            agent: Agent,
+            endpoint: str|None = None,
+            run_local: bool = False,
             frame_rate: float=0.1,
             buffer_len: int=1,
             transform=default_transform,
@@ -58,7 +62,7 @@ class SlateClient:
         self.state_lock = threading.Lock()
         self.loop_task = None
         self.ws_endpoint = "ws://localhost:8765"
-        self.ui_endpoint = "127.0.0.1"
+        self.ui_endpoint = endpoint or "127.0.0.1"
 
         obs, _ = self.env.reset()
         self.current_frame = None
@@ -69,7 +73,7 @@ class SlateClient:
         self.done = False
         self.info = {}
         self.high_score = 0
-        self.run_local = False
+        self.run_local = run_local
 
         self.ckpt_dir = checkpoints_dir
         self.checkpoints: list[str] = []
@@ -85,25 +89,6 @@ class SlateClient:
         # frame buffer
         self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
         
-
-    def init(
-            self, 
-            endpoint:str|None = None,
-            run_local: bool = False,
-        ) -> None:
-        """
-        Initialise the client with user-defined parameters
-
-        Args:
-            endpoint: the server endpoint that the client with connect to
-            run_local: whether to run the slate server locally or connect to a cloud server
-        """
-        if endpoint:
-            self.ui_endpoint = endpoint
-            #self.ws_endpoint = endpoint
-        
-        self.run_local = run_local
-
 
     def _rescan_checkpoints(self) -> None:
         """
