@@ -84,11 +84,11 @@ class SlateClient:
         self.current_recording: list[dict] = []
         self.is_recording = False
         self.run_start_time = None
-        self.start_recording()
+        self._start_recording()
 
         # frame buffer
         self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
-        
+
 
     def _rescan_checkpoints(self) -> None:
         """
@@ -101,9 +101,23 @@ class SlateClient:
         self.checkpoints = sorted(
             [f for f in os.listdir(self.ckpt_dir) if f.endswith(".pth")]
         )
+    
+
+    async def _send_checkpoints(self) -> None:
+        """
+        Send checkpoints to the server via a websocket
+        """
+        await self.websocket.send(
+            json.dumps(
+                {
+                    "type": "checkpoints_update",
+                    "payload": {"checkpoints": self.checkpoints},
+                }
+            )
+        )
 
 
-    def start_recording(self) -> None:
+    def _start_recording(self) -> None:
         """
         Start recording a new run session.
         """
@@ -112,7 +126,7 @@ class SlateClient:
         self.run_start_time = datetime.now()
 
 
-    async def stop_recording(self) -> None:
+    async def _stop_recording(self) -> None:
         """
         Stop recording and send the current recording to the server.
         """
@@ -146,7 +160,7 @@ class SlateClient:
         self.run_start_time = None
 
 
-    def record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
+    def _record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
         """
         Record a single step in the current recording.
         
@@ -174,7 +188,7 @@ class SlateClient:
         self.current_recording.append(step_data)
 
 
-    def encode_frame(self, frame: np.ndarray) -> str:
+    def _encode_frame(self, frame: np.ndarray) -> str:
         """
         Encode an RGB image frame into a base64-encoded JPEG string.
 
@@ -188,7 +202,7 @@ class SlateClient:
         return base64.b64encode(img).decode('utf-8')
 
 
-    async def run_step(self) -> None:
+    async def _run_step(self) -> None:
         """
         Execute a single step in the environment using the agent or random policy,
         and update internal state values.
@@ -204,7 +218,7 @@ class SlateClient:
         self.action_str = self.action_meanings[action]
 
         with self.state_lock:
-            self.current_frame = self.encode_frame(frame)
+            self.current_frame = self._encode_frame(frame)
             self.reward = reward
             self.done = done
             
@@ -213,16 +227,16 @@ class SlateClient:
             self.high_score = max(self.high_score, reward)
             
             # Record the step if recording is active
-            self.record_step(self.current_frame, reward, done, info, self.q_values)
+            self._record_step(self.current_frame, reward, done, info, self.q_values)
 
         if done:
-            await self.stop_recording()
+            await self._stop_recording()
             self.env.reset()
             self.running = False
-            self.start_recording()
+            self._start_recording()
             
 
-    async def send_state(self) -> None:
+    async def _send_state(self) -> None:
         """
         Send the current environment state, including encoded frame and metadata,
         over the active WebSocket connection.
@@ -246,21 +260,7 @@ class SlateClient:
             }))
 
 
-    async def _send_checkpoints(self) -> None:
-        """
-        Send checkpoints to the server via a websocket
-        """
-        await self.websocket.send(
-            json.dumps(
-                {
-                    "type": "checkpoints_update",
-                    "payload": {"checkpoints": self.checkpoints},
-                }
-            )
-        )
-
-
-    async def watch_checkpoints(self) -> None:
+    async def _watch_checkpoints(self) -> None:
         """
         Continuously watch the checkpoints folder for additional checkpoints
 
@@ -282,18 +282,18 @@ class SlateClient:
                 await self._send_checkpoints()
 
 
-    async def run_loop(self) -> None:
+    async def _run_loop(self) -> None:
         """
         Continuously execute steps in the environment and send updated state
         to the WebSocket server as long as `self.running` is True.
         """
         while self.running:
-            await self.run_step()
-            await self.send_state()
+            await self._run_step()
+            await self._send_state()
             await asyncio.sleep(self.frame_rate)
 
 
-    async def ws_handler(self, websocket) -> None:
+    async def _ws_handler(self, websocket) -> None:
         """
         Handle incoming WebSocket messages and perform actions like step, run, pause, and reset.
 
@@ -305,12 +305,12 @@ class SlateClient:
         """
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
-        await self.send_state()
+        await self._send_state()
         await self._send_checkpoints()
 
         # start watcher
         if self.ckpt_dir:
-            asyncio.create_task(self.watch_checkpoints())
+            asyncio.create_task(self._watch_checkpoints())
 
         try:
             async for msg in websocket:
@@ -320,25 +320,25 @@ class SlateClient:
 
                 match command:
                     case "step":
-                        await self.run_step()
-                        await self.send_state()
+                        await self._run_step()
+                        await self._send_state()
                     case "run":
                         self.running = True
                         if not self.loop_task or self.loop_task.done():
-                            self.loop_task = asyncio.create_task(self.run_loop())
+                            self.loop_task = asyncio.create_task(self._run_loop())
                     case "pause":
                         self.running = False
                     case "reset":
-                        await self.stop_recording()
-                        self.start_recording()
+                        await self._stop_recording()
+                        self._start_recording()
                         obs, _ = self.env.reset()
                         self.frame_buffer.reset(obs)
                         self.running = False
-                        await self.send_state()
+                        await self._send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
                         self.agent.load_checkpoint(os.path.join(self.ckpt_dir, self.checkpoint))
-                        await self.send_state()
+                        await self._send_state()
                     case "send_checkpoints":
                         await self._send_checkpoints()
         except websockets.ConnectionClosed:
@@ -357,7 +357,7 @@ class SlateClient:
             try:
                 print(f"[SlateRunner] dialing {url}")
                 async with websockets.connect(url) as ws:
-                    await self.ws_handler(ws)
+                    await self._ws_handler(ws)
             except (ConnectionRefusedError, websockets.WebSocketException) as e:
                 print(f"   failed ({e}) – retry in 1 s")
                 await asyncio.sleep(1)
@@ -367,14 +367,13 @@ class SlateClient:
         """
         Start the client and block the main thread to handle interaction with the WebSocket server.
         """
-        # If configured to run locally, start the embedded server and point endpoint to localhost
         if self.run_local:
             try:
                 from .server import start_local_server
-                # Start local dashboard on ui_endpoint:8000 and ML WS bridge  ws_endpoint:8765
                 start_local_server(host=self.ui_endpoint, port=8000)
                 print(f"\033[95m[Slate] Open dashboard at http://{self.ui_endpoint}:8000\033[0m")
             except Exception as e:
                 print(f"[Slate] Failed to start local server: {e}")
+        
         asyncio.run(self._dial_and_serve(self.ws_endpoint))
     
