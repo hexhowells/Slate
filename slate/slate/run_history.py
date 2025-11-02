@@ -56,6 +56,20 @@ class RunHistory:
     
     def get_run_history(self):
         return list(self.run_history)
+    
+
+    def get_history_metadata(self):
+        metadata = []
+        for run in self.run_history:
+            metadata.append({
+                'timestamp': run['timestamp'],
+                'duration': run['duration'],
+                'id': run['id'],
+                'total_steps': run['total_steps'],
+                'total_reward': run['total_reward'],
+            })
+        
+        return metadata
 
 
 class Recording:

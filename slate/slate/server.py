@@ -75,7 +75,7 @@ async def ml_handler(ws) -> None:
                     socketio.emit(msg_type, data)
                 case "run_completed":
                     run_history.stop_recording()
-                    socketio.emit("run_history_update", {"run_history": run_history.get_run_history()})
+                    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
                 case _:
                     print(f"ML Websocket received unknown message type: {msg_type}, ignoring")
                 
@@ -207,7 +207,7 @@ def on_playback_run(data) -> None:
 @socketio.on("get_run_history")
 def on_get_run_history() -> None:
     """Send current run history to the requesting client."""
-    socketio.emit("run_history_update", {"run_history": run_history.get_run_history()})
+    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
 
 
 def _run_ml_loop(ml_host: str) -> None:
