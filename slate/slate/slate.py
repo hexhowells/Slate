@@ -258,6 +258,17 @@ class SlateClient:
                     "checkpoint": self.checkpoint
                 }
             }))
+    
+
+    async def _run_loop(self) -> None:
+        """
+        Continuously execute steps in the environment and send updated state
+        to the WebSocket server as long as `self.running` is True.
+        """
+        while self.running:
+            await self._run_step()
+            await self._send_state()
+            await asyncio.sleep(self.frame_rate)
 
 
     async def _watch_checkpoints(self) -> None:
@@ -280,17 +291,6 @@ class SlateClient:
             if new_checkpoints != all_checkpoints:
                 all_checkpoints = new_checkpoints
                 await self._send_checkpoints()
-
-
-    async def _run_loop(self) -> None:
-        """
-        Continuously execute steps in the environment and send updated state
-        to the WebSocket server as long as `self.running` is True.
-        """
-        while self.running:
-            await self._run_step()
-            await self._send_state()
-            await asyncio.sleep(self.frame_rate)
 
 
     async def _ws_handler(self, websocket) -> None:
