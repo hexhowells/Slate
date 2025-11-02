@@ -146,15 +146,6 @@ def add_run_to_history(run_data: dict) -> None:
     socketio.emit("run_history_update", {"run_history": run_history})
 
 
-def get_run_history() -> list[dict]:
-    """Get the current run history.
-    
-    Returns:
-        List of run data dictionaries
-    """
-    return run_history
-
-
 @socketio.on("step")
 def on_step() -> None:
     """Request a single environment step from the ML runtime."""
@@ -251,7 +242,7 @@ def on_playback_run(data) -> None:
 @socketio.on("get_run_history")
 def on_get_run_history() -> None:
     """Send current run history to the requesting client."""
-    socketio.emit("run_history_update", {"run_history": get_run_history()})
+    socketio.emit("run_history_update", {"run_history": run_history})
 
 
 def start_local_server(
