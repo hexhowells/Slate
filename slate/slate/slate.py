@@ -308,7 +308,6 @@ class SlateClient:
         await self._send_state()
         await self._send_checkpoints()
 
-        # start watcher
         if self.ckpt_dir:
             asyncio.create_task(self._watch_checkpoints())
 
@@ -316,7 +315,6 @@ class SlateClient:
             async for msg in websocket:
                 data = json.loads(msg)
                 command = data.get("type")
-                #print(f'Client received command: {command}')
 
                 match command:
                     case "step":
