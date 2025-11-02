@@ -33,7 +33,6 @@ class RunHistory:
     
 
     def fetch_recording(self, uuid):
-        print(uuid)
         return self.run_history[(uuid-1) % self.max_history_size]
     
 
