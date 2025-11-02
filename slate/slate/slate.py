@@ -84,7 +84,6 @@ class SlateClient:
         self.current_recording: list[dict] = []
         self.is_recording = False
         self.run_start_time = None
-        self._start_recording()
 
         # frame buffer
         self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
@@ -117,48 +116,15 @@ class SlateClient:
         )
 
 
-    def _start_recording(self) -> None:
-        """
-        Start recording a new run session.
-        """
-        self.is_recording = True
-        self.current_recording = []
-        self.run_start_time = datetime.now()
-
-
     async def _stop_recording(self) -> None:
         """
         Stop recording and send the current recording to the server.
         """
-        if not self.is_recording or not self.current_recording:
-            return
-        
-        assert self.run_start_time is not None, "run_start_time timestamp variable is None"
-            
-        self.is_recording = False
-        
-        # Create run summary
-        run_data = {
-            "id": len(self.current_recording),  # Will be updated by server
-            "timestamp": self.run_start_time.isoformat(),
-            "duration": (datetime.now() - self.run_start_time).total_seconds(),
-            "total_steps": len(self.current_recording),
-            "total_reward": sum(step["metadata"].get("reward", 0) for step in self.current_recording),
-            "checkpoint": self.checkpoint,
-            "frames": [step["frame"] for step in self.current_recording],
-            "metadata": [step["metadata"] for step in self.current_recording]
-        }
-        
         # Send to server via websocket
         await self.websocket.send(json.dumps({
-            "type": "run_completed",
-            "payload": run_data
+            "type": "run_completed"
         }))
         
-        # Clear current recording
-        self.current_recording = []
-        self.run_start_time = None
-
 
     def _record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
         """
@@ -233,7 +199,6 @@ class SlateClient:
             await self._stop_recording()
             self.env.reset()
             self.running = False
-            self._start_recording()
             
 
     async def _send_state(self) -> None:
@@ -305,7 +270,7 @@ class SlateClient:
         """
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
-        await self._send_state()
+        #await self._send_state()
         await self._send_checkpoints()
 
         if self.ckpt_dir:
@@ -328,7 +293,6 @@ class SlateClient:
                         self.running = False
                     case "reset":
                         await self._stop_recording()
-                        self._start_recording()
                         obs, _ = self.env.reset()
                         self.frame_buffer.reset(obs)
                         self.running = False

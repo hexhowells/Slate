@@ -9,6 +9,8 @@ import websockets
 from pathlib import Path
 import logging
 
+from slate.run_history import RunHistory
+
 logging.getLogger('werkzeug').disabled = True
 
 
@@ -31,11 +33,8 @@ ML_WS_PORT = 8765
 ml_loop = asyncio.new_event_loop()
 ml_clients: set[asyncio.Future] = set()
 
-# Server-side run history storage
 MAX_HISTORY_SIZE = 5
-run_history: list[dict] = []
-run_data_storage: dict[int, dict] = {}  # Store full run data separately
-
+run_history = RunHistory(MAX_HISTORY_SIZE)
 
 
 @app.route("/")
@@ -66,11 +65,17 @@ async def ml_handler(ws) -> None:
             msg_type = data.get("type", None)
             
             match msg_type:
-                case "frame_update" | "checkpoints_update":
+                case "frame_update":
+                    if run_history.recording:
+                        run_history.update_recording(data['payload'])
+                    else:
+                        run_history.new_recording(data['payload'])
+                    socketio.emit(msg_type, data)
+                case "checkpoints_update":
                     socketio.emit(msg_type, data)
                 case "run_completed":
-                    run_data = data.get("payload", {})
-                    add_run_to_history(run_data)
+                    run_history.stop_recording()
+                    socketio.emit("run_history_update", {"run_history": run_history.get_run_history()})
                 case _:
                     print(f"ML Websocket received unknown message type: {msg_type}, ignoring")
                 
@@ -90,45 +95,7 @@ async def ml_server(ml_host: str = "127.0.0.1") -> None:
     async with websockets.serve(ml_handler, ml_host, ML_WS_PORT):
         print(f"[Slate] waiting for ML on ws://{ml_host}:{ML_WS_PORT}")
         await asyncio.Future()
-
-
-def add_run_to_history(run_data: dict) -> None:
-    """Add a completed run to the server-side history.
     
-    Args:
-        run_data: Dictionary containing run information and frames
-    """
-    global run_history, run_data_storage
-    
-    # Assign server-side ID
-    run_id = len(run_history)
-    run_data["id"] = run_id
-    
-    # Store full data separately (including frames)
-    run_data_storage[run_id] = run_data
-    
-    # Create metadata-only version for history list
-    run_metadata = {
-        "id": run_id,
-        "timestamp": run_data["timestamp"],
-        "duration": run_data["duration"],
-        "total_steps": run_data["total_steps"],
-        "total_reward": run_data["total_reward"],
-        "checkpoint": run_data["checkpoint"]
-    }
-    
-    # Add to history
-    run_history.append(run_metadata)
-    
-    # Maintain max history size
-    if len(run_history) > MAX_HISTORY_SIZE:
-        old_run = run_history.pop(0)
-        # Clean up stored data for removed run
-        if old_run["id"] in run_data_storage:
-            del run_data_storage[old_run["id"]]
-    
-    # Broadcast updated history to all connected clients
-    socketio.emit("run_history_update", {"run_history": run_history})
 
 
 def _send_to_ml(payload: dict) -> None:
@@ -199,8 +166,8 @@ def on_playback_run(data) -> None:
         data: Dict containing a `run_id` key with the run identifier.
     """
     run_id = data.get("run_id", 0)
-    if run_id in run_data_storage:
-        run_data = run_data_storage[run_id]
+    if run_history.check_id(run_id):
+        run_data = run_history.fetch_recording(run_id)
         
         # Check if data is too large (estimate > 500KB)
         estimated_size = len(str(run_data))
@@ -240,7 +207,7 @@ def on_playback_run(data) -> None:
 @socketio.on("get_run_history")
 def on_get_run_history() -> None:
     """Send current run history to the requesting client."""
-    socketio.emit("run_history_update", {"run_history": run_history})
+    socketio.emit("run_history_update", {"run_history": run_history.get_run_history()})
 
 
 def _run_ml_loop(ml_host: str) -> None:
