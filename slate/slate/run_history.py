@@ -36,6 +36,14 @@ class RunHistory:
         return self.run_history[(uuid-1) % self.max_history_size]
     
 
+    def fetch_recording_frame(self, uuid, frame):
+        run = self.run_history[(uuid-1) % self.max_history_size]
+        if 0 <= frame <= len(run):
+            return run[frame]
+        else:
+            return run[0]
+    
+
     def new_recording(self, data):
         self.current_recording = Recording(self.recording_num, data)
         self.recording_ids.append(self.recording_num)
