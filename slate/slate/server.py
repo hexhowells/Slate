@@ -97,7 +97,6 @@ async def ml_server(ml_host: str = "127.0.0.1") -> None:
         await asyncio.Future()
     
 
-
 def _send_to_ml(payload: dict) -> None:
     """Send a JSON payload to all connected ML runtime WebSocket clients.
 
@@ -109,6 +108,10 @@ def _send_to_ml(payload: dict) -> None:
     txt = json.dumps(payload)
     for ws in list(ml_clients):
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
+
+
+async def stream_run():
+    pass
 
 
 @socketio.on("step")
@@ -166,42 +169,29 @@ def on_playback_run(data) -> None:
         data: Dict containing a `run_id` key with the run identifier.
     """
     run_id = data.get("run_id", 0)
+    frame_pointer = data.get("frame", 0)
+
     if run_history.check_id(run_id):
+        on_pause()
+
         run_data = run_history.fetch_recording(run_id)
-        
-        # Check if data is too large (estimate > 500KB)
-        estimated_size = len(str(run_data))
-        if estimated_size > 500000:  # 500KB threshold
-            # Send in chunks
-            frames = run_data.get("frames", [])
-            metadata = run_data.get("metadata", [])
-            
-            # Send run info first
-            run_info = {
-                "id": run_data["id"],
-                "timestamp": run_data["timestamp"],
-                "duration": run_data["duration"],
-                "total_steps": run_data["total_steps"],
-                "total_reward": run_data["total_reward"],
-                "checkpoint": run_data["checkpoint"],
-                "chunked": True,
-                "total_chunks": len(frames)
-            }
-            socketio.emit("playback_data_start", {"payload": run_info})
-            
-            # Send frames in chunks
-            chunk_size = 10  # Send 10 frames per chunk
-            for i in range(0, len(frames), chunk_size):
-                chunk_frames = frames[i:i+chunk_size]
-                chunk_metadata = metadata[i:i+chunk_size]
-                socketio.emit("playback_data_chunk", {
-                    "chunk_index": i // chunk_size,
-                    "frames": chunk_frames,
-                    "metadata": chunk_metadata
-                })
-        else:
-            # Send normally for smaller runs
-            socketio.emit("playback_data", {"payload": run_data})
+
+        run_info = {
+            "id": run_data["id"],
+            "timestamp": run_data["timestamp"],
+            "duration": run_data["duration"],
+            "total_steps": run_data["total_steps"],
+            "total_reward": run_data["total_reward"],
+            "checkpoint": run_data["checkpoint"]
+        }
+        socketio.emit("playback_metadata", {"payload": run_info})
+        """
+        1. Check that ML server is paused, if not then pause it
+        2. Check another playback isn't currently in progress, if so, stop it (or change the current frame if the ID is the same)
+        3. Begin a asynchio function to start streaming the run_history given an ID and start time
+        4. That process will remain open and periodically send socketio.emit("playback_frame", data) as a given frame rate
+        5. @socketio.on("playback_pause") - should pause the socketio.emit()
+        """
 
 
 @socketio.on("get_run_history")
