@@ -10,6 +10,7 @@ from pathlib import Path
 import logging
 
 from slate.run_history import RunHistory
+from slate.session import Session
 
 logging.getLogger('werkzeug').disabled = True
 
@@ -35,6 +36,29 @@ ml_clients: set[asyncio.Future] = set()
 
 MAX_HISTORY_SIZE = 5
 run_history = RunHistory(MAX_HISTORY_SIZE)
+
+
+sessions: dict[str, Session] = {}
+
+
+def get_session(sid: str) -> Session:
+    """
+    Get session given an SID
+
+    If a sesssion with the given SID is not available, a new Session object is created
+
+    Args:
+        sid: the session id to fetch
+    
+    Return:
+        a Session object of the current session, or a new Session object if the session is new
+    """
+    sess = sessions.get(sid)
+    if not sess:
+        sess = Session(sid)
+        sessions[sid] = sess
+    
+    return sess
 
 
 @app.route("/")
