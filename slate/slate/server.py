@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO
 import asyncio
 import threading
@@ -110,6 +110,10 @@ def _send_to_ml(payload: dict) -> None:
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
+def get_request_id():
+    return request.sid  # type: ignore
+
+
 async def stream_run(uuid, start_frame):
     while True:
         frame_data = run_history.fetch_recording_frame(uuid, start_frame)
@@ -119,6 +123,7 @@ async def stream_run(uuid, start_frame):
 
 @socketio.on("step")
 def on_step() -> None:
+    print(get_request_id())
     """Request a single environment step from the ML runtime."""
     _send_to_ml({"type": "step"})
 
