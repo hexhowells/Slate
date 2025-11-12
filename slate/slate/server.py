@@ -204,7 +204,7 @@ def on_playback_load(data) -> None:
     """
     run_id = data.get("run_id", 0)
     sid = get_request_id()
-    session = get_session(sid)
+    sess = get_session(sid)
 
     if run_history.check_id(run_id):
         on_pause()
@@ -219,6 +219,8 @@ def on_playback_load(data) -> None:
             "total_reward": run_data["total_reward"],
             "checkpoint": run_data["checkpoint"]
         }
+        sess.asset = run_info
+
         socketio.emit("playback:loaded", {"payload": run_info})
     else:
         socketio.emit("playback:error", {"message": f"Run ID {run_id} could not be found."})
@@ -226,7 +228,18 @@ def on_playback_load(data) -> None:
 
 @socketio.on("playback:seek")
 def on_playback_seek(data) -> None:
-    pass
+    cursor = data.get("frame", None)
+    if cursor is None:
+        socketio.emit("playback:error", {"message": f"No frame index provided in message."})
+    
+    sid = get_request_id()
+    sess = get_session(sid)
+
+    if 0 > cursor > sess.asset['total_steps']:
+        socketio.emit("playback:error", {"message": f"Frame index is out of range for the given video"})
+    
+    sess.cursor = cursor
+    socketio.emit("playback:seek:ok", {"cursor": sess.cursor})
 
 
 @socketio.on("playback:pause")
