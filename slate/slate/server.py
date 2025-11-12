@@ -165,7 +165,32 @@ def on_send_run_history() -> None:
 
 @socketio.on("playback:load")
 def on_playback_load(data) -> None:
-    pass
+    """
+    Load a playback video given an run ID
+
+    Verifies the run ID is valid and returns the run metadata to the client
+
+    Args:
+        data: Dict containing a `run_id` key with the run identifier.
+    """
+    run_id = data.get("run_id", 0)
+
+    if run_history.check_id(run_id):
+        on_pause()
+
+        run_data = run_history.fetch_recording(run_id)
+
+        run_info = {
+            "id": run_data["id"],
+            "timestamp": run_data["timestamp"],
+            "duration": run_data["duration"],
+            "total_steps": run_data["total_steps"],
+            "total_reward": run_data["total_reward"],
+            "checkpoint": run_data["checkpoint"]
+        }
+        socketio.emit("playback:loaded", {"payload": run_info})
+    else:
+        socketio.emit("playback:error", {"message": f"Run ID {run_id} could not be found."})
 
 
 @socketio.on("playback:seek")
