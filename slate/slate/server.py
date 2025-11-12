@@ -203,6 +203,8 @@ def on_playback_load(data) -> None:
         data: Dict containing a `run_id` key with the run identifier.
     """
     run_id = data.get("run_id", 0)
+    sid = get_request_id()
+    session = get_session(sid)
 
     if run_history.check_id(run_id):
         on_pause()
@@ -229,12 +231,16 @@ def on_playback_seek(data) -> None:
 
 @socketio.on("playback:pause")
 def on_playback_pause(data) -> None:
-    pass
+    sid = get_request_id()
+    sess = get_session(sid)
+    sess.paused = True
 
 
 @socketio.on("playback:resume")
 def on_playback_resume(data) -> None:
-    pass
+    sid = get_request_id()
+    sess = get_session(sid)
+    sess.paused = False
 
 
 @socketio.on("playback:ack")
