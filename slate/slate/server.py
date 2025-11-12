@@ -110,8 +110,11 @@ def _send_to_ml(payload: dict) -> None:
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
-async def stream_run():
-    pass
+async def stream_run(uuid, start_frame):
+    while True:
+        frame_data = run_history.fetch_recording_frame(uuid, start_frame)
+        start_frame += 1
+        socketio.emit("run_frame", {"frame_data": frame_data})
 
 
 @socketio.on("step")
@@ -158,6 +161,31 @@ def on_send_checkpoints() -> None:
 def on_send_run_history() -> None:
     """Request the run history from the ML runtime."""
     _send_to_ml({"type": "send_run_history"})
+
+
+@socketio.on("playback:load")
+def on_playback_load(data) -> None:
+    pass
+
+
+@socketio.on("playback:seek")
+def on_playback_seek(data) -> None:
+    pass
+
+
+@socketio.on("playback:pause")
+def on_playback_pause(data) -> None:
+    pass
+
+
+@socketio.on("playback:resume")
+def on_playback_resume(data) -> None:
+    pass
+
+
+@socketio.on("playback:ack")
+def on_playback_ack(data) -> None:
+    pass
 
 
 @socketio.on("playback_run")
