@@ -14,10 +14,10 @@ class SlateViewer {
     
     // Playback functionality
     this.isPlaybackMode = false;
-    this.currentPlaybackData = null;
-    this.playbackIndex = 0;
-    this.playbackInterval = null;
-    this.playbackSpeed = 100; // ms between frames
+    this.currentPlaybackRun = null;
+    this.currentFrameCursor = 0;
+    this.isPlaybackPaused = true;
+    this.isAwaitingFrame = false;
     
     this.initializeEventListeners();
     this.requestCheckpoints();
@@ -56,8 +56,24 @@ class SlateViewer {
       this.handleRunHistoryUpdate(msg);
     });
 
-    this.socket.on("playback_data", (msg) => {
-      this.handlePlaybackData(msg);
+    this.socket.on("playback:loaded", (msg) => {
+      this.handlePlaybackLoaded(msg);
+    });
+
+    this.socket.on("playback:frame", (msg) => {
+      this.handlePlaybackFrame(msg);
+    });
+
+    this.socket.on("playback:eos", (msg) => {
+      this.handlePlaybackEOS(msg);
+    });
+
+    this.socket.on("playback:error", (msg) => {
+      this.handlePlaybackError(msg);
+    });
+
+    this.socket.on("playback:seek:ok", (msg) => {
+      this.handlePlaybackSeekOk(msg);
     });
   }
 
@@ -116,10 +132,14 @@ class SlateViewer {
   }
 
   /**
-   * Handle frame updates from the ML client
+   * Handle frame updates from the ML client (live mode only)
    * @param {Object} msg - Message containing frame data
    */
   handleFrameUpdate(msg) {
+    if (this.isPlaybackMode) {
+      return;
+    }
+
     const payload = msg.payload;
     const frameElement = document.getElementById("env_frame");
     
@@ -168,14 +188,113 @@ class SlateViewer {
   }
 
   /**
-   * Handle playback data from the server
-   * @param {Object} msg - Message containing playback data
+   * Handle playback loaded event from the server
+   * @param {Object} msg - Message containing run metadata
    */
-  handlePlaybackData(msg) {
-    console.log("Received playback data:", msg.payload);
-    this.currentPlaybackData = msg.payload;
-    this.playbackIndex = 0;
+  handlePlaybackLoaded(msg) {
+    console.log("Playback loaded:", msg.payload);
+    this.currentPlaybackRun = msg.payload;
+    this.currentFrameCursor = 0;
+    this.isPlaybackPaused = true;
+    this.isAwaitingFrame = false;
     this.enterPlaybackMode();
+  }
+
+  /**
+   * Handle playback frame event from the server
+   * @param {Object} msg - Message containing frame data
+   */
+  handlePlaybackFrame(msg) {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    const frameData = msg.frame_data;
+    const cursor = msg.cursor;
+
+    // Update frame display
+    const frameElement = document.getElementById("env_frame");
+    frameElement.style.opacity = '0.7';
+    
+    // Handle different frame_data structures
+    let frameImage, reward, qValues, action, checkpoint;
+    
+    if (typeof frameData === 'string') {
+      // If frame_data is just the base64 string
+      frameImage = frameData;
+    } else if (frameData && frameData.frame) {
+      // If frame_data is an object with frame property
+      frameImage = frameData.frame;
+      reward = frameData.reward;
+      qValues = frameData.q_values;
+      action = frameData.action;
+      checkpoint = frameData.checkpoint || this.currentPlaybackRun.checkpoint;
+    } else {
+      // Fallback: try to extract from metadata if available
+      console.warn("Unexpected frame_data structure:", frameData);
+      return;
+    }
+
+    frameElement.src = "data:image/jpeg;base64," + frameImage;
+    frameElement.onload = () => {
+      frameElement.style.opacity = '1';
+    };
+
+    // Update info display if we have the data
+    if (qValues !== undefined && action !== undefined) {
+      this.updateInfoDisplay({
+        q_values: qValues,
+        action: action,
+        reward: reward || 0,
+        checkpoint: checkpoint
+      });
+    }
+
+    // Update score (for playback, show the frame's reward)
+    if (reward !== undefined) {
+      const scoreElement = document.getElementById("score");
+      scoreElement.innerText = Math.round(reward);
+    }
+
+    // Update current cursor
+    this.currentFrameCursor = cursor;
+
+    // Send acknowledgment
+    this.isAwaitingFrame = false;
+    this.socket.emit("playback:ack", {});
+  }
+
+  /**
+   * Handle playback end of stream event
+   * @param {Object} msg - Message containing cursor info
+   */
+  handlePlaybackEOS(msg) {
+    console.log("Playback end of stream at cursor:", msg.cursor);
+    this.isPlaybackPaused = true;
+    this.isAwaitingFrame = false;
+    
+    // Update UI to show paused state
+    document.getElementById('playback_play').classList.remove('active');
+    document.getElementById('playback_pause').classList.add('active');
+    document.getElementById('playback_stop').classList.remove('active');
+  }
+
+  /**
+   * Handle playback error event
+   * @param {Object} msg - Message containing error info
+   */
+  handlePlaybackError(msg) {
+    console.error("Playback error:", msg.message);
+    alert(`Playback Error: ${msg.message}`);
+  }
+
+  /**
+   * Handle playback seek OK event
+   * @param {Object} msg - Message containing cursor info
+   */
+  handlePlaybackSeekOk(msg) {
+    console.log("Seek successful, cursor:", msg.cursor);
+    this.currentFrameCursor = msg.cursor;
   }
 
   /**
@@ -214,8 +333,8 @@ class SlateViewer {
    * @param {number} runId - ID of the run to playback
    */
   startPlayback(runId) {
-    console.log("Starting playback of run:", runId);
-    this.socket.emit("playback_run", { run_id: runId });
+    console.log("Loading playback for run:", runId);
+    this.socket.emit("playback:load", { run_id: runId });
   }
 
   /**
@@ -223,17 +342,24 @@ class SlateViewer {
    */
   enterPlaybackMode() {
     this.isPlaybackMode = true;
-    this.playbackIndex = 0;
     
     // Show playback controls
     document.getElementById("playback_controls").style.display = "block";
     
     // Update playback status
     document.getElementById("playback_status").textContent = 
-      `Playing back Run ${this.currentPlaybackData.id}`;
+      `Playing back Run ${this.currentPlaybackRun.id}`;
     
-    // Start playback
-    this.playPlayback();
+    // Update mode indicator
+    const modeStatus = document.getElementById("mode_status");
+    modeStatus.className = "mode-status playback-mode";
+    modeStatus.querySelector(".mode-text").textContent = "Playback Mode";
+    
+    // Start paused by default
+    this.isPlaybackPaused = true;
+    document.getElementById('playback_play').classList.add('active');
+    document.getElementById('playback_pause').classList.remove('active');
+    document.getElementById('playback_stop').classList.remove('active');
   }
 
   /**
@@ -241,14 +367,10 @@ class SlateViewer {
    */
   exitPlaybackMode() {
     this.isPlaybackMode = false;
-    this.currentPlaybackData = null;
-    this.playbackIndex = 0;
-    
-    // Stop any ongoing playback
-    if (this.playbackInterval) {
-      clearInterval(this.playbackInterval);
-      this.playbackInterval = null;
-    }
+    this.currentPlaybackRun = null;
+    this.currentFrameCursor = 0;
+    this.isPlaybackPaused = true;
+    this.isAwaitingFrame = false;
     
     // Hide playback controls
     document.getElementById("playback_controls").style.display = "none";
@@ -257,61 +379,83 @@ class SlateViewer {
     document.getElementById("playback_play").classList.remove("active");
     document.getElementById("playback_pause").classList.remove("active");
     document.getElementById("playback_stop").classList.remove("active");
+    
+    // Reset mode indicator
+    const modeStatus = document.getElementById("mode_status");
+    modeStatus.className = "mode-status live-mode";
+    modeStatus.querySelector(".mode-text").textContent = "Live Mode";
+    
+    // Reset score
+    this.cumulativeScore = 0;
+    document.getElementById("score").innerText = "–";
   }
 
   /**
-   * Play the current playback data
+   * Resume playback (start streaming)
    */
-  playPlayback() {
-    if (!this.currentPlaybackData || this.playbackIndex >= this.currentPlaybackData.frames.length) {
-      this.stopPlayback();
+  resumePlayback() {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
       return;
     }
 
-    // Update frame
-    const frameElement = document.getElementById("env_frame");
-    frameElement.src = "data:image/jpeg;base64," + this.currentPlaybackData.frames[this.playbackIndex];
+    this.isPlaybackPaused = false;
+    this.socket.emit("playback:resume", {});
     
-    // Update info display
-    const metadata = this.currentPlaybackData.metadata[this.playbackIndex];
-    this.updateInfoDisplay({
-      q_values: metadata.q_values,
-      action: metadata.action,
-      reward: metadata.reward,
-      checkpoint: this.currentPlaybackData.checkpoint
-    });
-
-    // Update score
-    const scoreElement = document.getElementById("score");
-    scoreElement.innerText = Math.round(metadata.reward);
-
-    this.playbackIndex++;
-    
-    // Continue playback
-    this.playbackInterval = setTimeout(() => {
-      this.playPlayback();
-    }, this.playbackSpeed);
+    // Update UI
+    document.getElementById('playback_play').classList.remove('active');
+    document.getElementById('playback_pause').classList.add('active');
+    document.getElementById('playback_stop').classList.remove('active');
   }
 
   /**
    * Pause playback
    */
   pausePlayback() {
-    if (this.playbackInterval) {
-      clearInterval(this.playbackInterval);
-      this.playbackInterval = null;
+    if (!this.isPlaybackMode) {
+      return;
     }
+
+    this.isPlaybackPaused = true;
+    this.socket.emit("playback:pause", {});
+    
+    // Update UI
+    document.getElementById('playback_play').classList.add('active');
+    document.getElementById('playback_pause').classList.remove('active');
+    document.getElementById('playback_stop').classList.remove('active');
   }
 
   /**
-   * Stop playback
+   * Stop playback and seek to beginning
    */
   stopPlayback() {
-    this.pausePlayback();
-    this.playbackIndex = 0;
-    document.getElementById("playback_play").classList.remove("active");
-    document.getElementById("playback_pause").classList.remove("active");
-    document.getElementById("playback_stop").classList.add("active");
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    this.isPlaybackPaused = true;
+    this.socket.emit("playback:seek", { frame: 0 });
+    
+    // Update UI
+    document.getElementById('playback_play').classList.add('active');
+    document.getElementById('playback_pause').classList.remove('active');
+    document.getElementById('playback_stop').classList.add('active');
+  }
+
+  /**
+   * Seek to a specific frame
+   * @param {number} frameIndex - Frame index to seek to
+   */
+  seekToFrame(frameIndex) {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    if (frameIndex < 0 || frameIndex >= this.currentPlaybackRun.total_steps) {
+      console.warn("Seek frame out of range:", frameIndex);
+      return;
+    }
+
+    this.socket.emit("playback:seek", { frame: frameIndex });
   }
 
   /**
@@ -444,17 +588,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   document.getElementById('playback_play').addEventListener('click', () => {
-    slateViewer.playPlayback();
-    document.getElementById('playback_play').classList.add('active');
-    document.getElementById('playback_pause').classList.remove('active');
-    document.getElementById('playback_stop').classList.remove('active');
+    slateViewer.resumePlayback();
   });
   
   document.getElementById('playback_pause').addEventListener('click', () => {
     slateViewer.pausePlayback();
-    document.getElementById('playback_play').classList.remove('active');
-    document.getElementById('playback_pause').classList.add('active');
-    document.getElementById('playback_stop').classList.remove('active');
   });
   
   document.getElementById('playback_stop').addEventListener('click', () => {
