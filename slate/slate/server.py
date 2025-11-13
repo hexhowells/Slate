@@ -274,14 +274,16 @@ def on_playback_seek(data) -> None:
 def on_playback_pause(data) -> None:
     sid = get_request_id()
     sess = get_session(sid)
-    sess.paused = True
+    with sess.lock:
+        sess.paused = True
 
 
 @socketio.on("playback:resume")
 def on_playback_resume(data) -> None:
     sid = get_request_id()
     sess = get_session(sid)
-    sess.paused = False
+    with sess.lock:
+        sess.paused = False
 
 
 @socketio.on("playback:ack")
