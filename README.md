@@ -62,5 +62,5 @@ The `SlateClient` constructor accepts:
 When `run_local=True`, the dashboard will be available at `http://localhost:8000` after calling `start_client()`.
 
 ## Example of UI
-<img src="images/screenshot.png" alt="Screenshot of Slate web UI" style="border-radius: 12px;" />
+<img src="images/screenshot.png" alt="Screenshot of Slate web UI"/>
 
