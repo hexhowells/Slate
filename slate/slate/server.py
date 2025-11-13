@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO
 import asyncio
 import threading
@@ -8,6 +8,10 @@ import json
 import websockets
 from pathlib import Path
 import logging
+import time
+
+from slate.run_history import RunHistory
+from slate.session import Session
 
 logging.getLogger('werkzeug').disabled = True
 
@@ -31,10 +35,31 @@ ML_WS_PORT = 8765
 ml_loop = asyncio.new_event_loop()
 ml_clients: set[asyncio.Future] = set()
 
-# Server-side run history storage
 MAX_HISTORY_SIZE = 5
-run_history: list[dict] = []
-run_data_storage: dict[int, dict] = {}  # Store full run data separately
+run_history = RunHistory(MAX_HISTORY_SIZE)
+
+
+sessions: dict[str, Session] = {}
+
+
+def get_session(sid: str) -> Session:
+    """
+    Get session given an SID
+
+    If a sesssion with the given SID is not available, a new Session object is created
+
+    Args:
+        sid: the session id to fetch
+    
+    Return:
+        a Session object of the current session, or a new Session object if the session is new
+    """
+    sess = sessions.get(sid)
+    if not sess:
+        sess = Session(sid)
+        sessions[sid] = sess
+    
+    return sess
 
 
 @app.route("/")
@@ -62,14 +87,23 @@ async def ml_handler(ws) -> None:
     try:
         async for msg in ws:
             data = json.loads(msg)
-            evt = data.get("type", "frame_update")
+            msg_type = data.get("type", None)
             
-            # Handle special case for completed runs
-            if evt == "run_completed":
-                run_data = data.get("payload", {})
-                add_run_to_history(run_data)
-            else:
-                socketio.emit(evt, data)
+            match msg_type:
+                case "frame_update":
+                    if run_history.recording:
+                        run_history.update_recording(data['payload'])
+                    else:
+                        run_history.new_recording(data['payload'])
+                    socketio.emit(msg_type, data)
+                case "checkpoints_update":
+                    socketio.emit(msg_type, data)
+                case "run_completed":
+                    run_history.stop_recording()
+                    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
+                case _:
+                    print(f"ML Websocket received unknown message type: {msg_type}, ignoring")
+                
     finally:
         ml_clients.discard(ws)
 
@@ -86,13 +120,7 @@ async def ml_server(ml_host: str = "127.0.0.1") -> None:
     async with websockets.serve(ml_handler, ml_host, ML_WS_PORT):
         print(f"[Slate] waiting for ML on ws://{ml_host}:{ML_WS_PORT}")
         await asyncio.Future()
-
-
-def _run_ml_loop(ml_host: str) -> None:
-    """Run the ML WebSocket server inside a dedicated asyncio event loop."""
-    asyncio.set_event_loop(ml_loop)
-    ml_loop.run_until_complete(ml_server(ml_host))
-
+    
 
 def _send_to_ml(payload: dict) -> None:
     """Send a JSON payload to all connected ML runtime WebSocket clients.
@@ -107,52 +135,87 @@ def _send_to_ml(payload: dict) -> None:
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
-def add_run_to_history(run_data: dict) -> None:
-    """Add a completed run to the server-side history.
-    
+def get_request_id() -> str:
+    """
+    Get current socketio SID
+
+    Return:
+        current socketio SID
+    """
+    return request.sid  # type: ignore
+
+
+def stream_run(session: Session) -> None:
+    """
+    Start streaming a run to the client
+
+    Handles interrupts from the client such as pausing, ack, etc
+
     Args:
-        run_data: Dictionary containing run information and frames
+        session: Session object storing information about the current session
     """
-    global run_history, run_data_storage
+    while True:
+        with session.lock:
+            if not session.streaming:
+                break
+
+            if session.paused:
+                pass
+            elif session.awaiting_ack:
+                pass
+            else:
+                run_id = session.asset.get("id")
+                cursor = session.cursor
+
+                total_steps: int = session.asset.get("total_steps", 0)
+                if cursor >= total_steps:
+                    socketio.emit("playback:eos", {"cursor": cursor})
+                    session.streaming = False
+                    break
+
+                session.last_sent_cursor = cursor
+                session.cursor += 1
+                session.awaiting_ack = True
+        
+        with session.lock:
+            if not session.streaming:
+                break
+
+            paused = session.paused
+            awaiting = session.awaiting_ack
+            last_cursor = session.last_sent_cursor
+            run_id = session.asset.get("id")
+        
+        if (not paused) and (awaiting) and (last_cursor is not None):
+            frame_data = run_history.fetch_recording_frame(run_id, last_cursor)
+            if frame_data:
+                socketio.emit("playback:frame", {"frame_data": frame_data, "cursor": last_cursor})
+            else:
+                socketio.emit("playback:error", 
+                            {
+                                  "message": 
+                                  f"No frame could be loaded for cursor position {last_cursor}"
+                            })
+        
+        time.sleep(0.1)
     
-    # Assign server-side ID
-    run_id = len(run_history)
-    run_data["id"] = run_id
-    
-    # Store full data separately (including frames)
-    run_data_storage[run_id] = run_data
-    
-    # Create metadata-only version for history list
-    run_metadata = {
-        "id": run_id,
-        "timestamp": run_data["timestamp"],
-        "duration": run_data["duration"],
-        "total_steps": run_data["total_steps"],
-        "total_reward": run_data["total_reward"],
-        "checkpoint": run_data["checkpoint"]
-    }
-    
-    # Add to history
-    run_history.append(run_metadata)
-    
-    # Maintain max history size
-    if len(run_history) > MAX_HISTORY_SIZE:
-        old_run = run_history.pop(0)
-        # Clean up stored data for removed run
-        if old_run["id"] in run_data_storage:
-            del run_data_storage[old_run["id"]]
-    
-    # Broadcast updated history to all connected clients
-    socketio.emit("run_history_update", {"run_history": run_history})
+    with session.lock:
+        session.streaming = False
+        session.awaiting_ack = False
 
 
-def get_run_history() -> list[dict]:
-    """Get the current run history.
-    
-    Returns:
-        List of run data dictionaries
+def launch_stream(session: Session) -> None:
     """
-    return run_history
+    Start video stream if the stream has not already started
+
+    Args:
+        session: Session object containing the session information
+    """
+    with session.lock:
+        if session.streaming:
+            return
+        session.streaming = True
+    socketio.start_background_task(stream_run, session)
 
 
 @socketio.on("step")
@@ -201,57 +264,141 @@ def on_send_run_history() -> None:
     _send_to_ml({"type": "send_run_history"})
 
 
-@socketio.on("playback_run")
-def on_playback_run(data) -> None:
-    """Send playback data for a specific run directly to the requesting client.
-    Uses chunked transfer for large runs to avoid WebSocket size limits.
-    
+@socketio.on("playback:load")
+def on_playback_load(data) -> None:
+    """
+    Load a playback video given an run ID
+
+    Verifies the run ID is valid and returns the run metadata to the client
+
     Args:
         data: Dict containing a `run_id` key with the run identifier.
     """
     run_id = data.get("run_id", 0)
-    if run_id in run_data_storage:
-        run_data = run_data_storage[run_id]
-        
-        # Check if data is too large (estimate > 500KB)
-        estimated_size = len(str(run_data))
-        if estimated_size > 500000:  # 500KB threshold
-            # Send in chunks
-            frames = run_data.get("frames", [])
-            metadata = run_data.get("metadata", [])
-            
-            # Send run info first
-            run_info = {
-                "id": run_data["id"],
-                "timestamp": run_data["timestamp"],
-                "duration": run_data["duration"],
-                "total_steps": run_data["total_steps"],
-                "total_reward": run_data["total_reward"],
-                "checkpoint": run_data["checkpoint"],
-                "chunked": True,
-                "total_chunks": len(frames)
-            }
-            socketio.emit("playback_data_start", {"payload": run_info})
-            
-            # Send frames in chunks
-            chunk_size = 10  # Send 10 frames per chunk
-            for i in range(0, len(frames), chunk_size):
-                chunk_frames = frames[i:i+chunk_size]
-                chunk_metadata = metadata[i:i+chunk_size]
-                socketio.emit("playback_data_chunk", {
-                    "chunk_index": i // chunk_size,
-                    "frames": chunk_frames,
-                    "metadata": chunk_metadata
-                })
-        else:
-            # Send normally for smaller runs
-            socketio.emit("playback_data", {"payload": run_data})
+    sid = get_request_id()
+    sess = get_session(sid)
+
+    if run_history.check_id(run_id):
+        on_pause()
+
+        run_data = run_history.fetch_recording(run_id)
+
+        run_info = {
+            "id": run_data["id"],
+            "timestamp": run_data["timestamp"],
+            "duration": run_data["duration"],
+            "total_steps": run_data["total_steps"],
+            "total_reward": run_data["total_reward"],
+            "checkpoint": run_data["checkpoint"]
+        }
+
+        with sess.lock:
+            sess.asset = run_info
+            sess.cursor = 0
+            sess.paused = True
+            sess.awaiting_ack = False
+            sess.last_sent_cursor = None
+
+        socketio.emit("playback:loaded", {"payload": run_info})
+    else:
+        socketio.emit("playback:error", {"message": f"Run ID {run_id} could not be found."})
+
+
+@socketio.on("playback:seek")
+def on_playback_seek(data) -> None:
+    """
+    Seek to a given frame in the playback video
+
+    Args:
+        data: data sent from the client - including the frame to seek to
+    """
+    cursor = data.get("frame", None)
+    if cursor is None:
+        socketio.emit("playback:error", {"message": f"No frame index provided in message."})
+        return
+    
+    sid = get_request_id()
+    sess = get_session(sid)
+
+    if not (0 <= cursor < sess.asset.get('total_steps', 0)):
+        socketio.emit("playback:error", {"message": f"Frame index is out of range for the given video"})
+        return
+    
+    with sess.lock:
+        sess.cursor = cursor
+        sess.awaiting_ack = False
+        sess.last_sent_cursor = None
+        resume_stream = not sess.paused
+    
+    if resume_stream:
+        launch_stream(sess)
+    
+    socketio.emit("playback:seek:ok", {"cursor": sess.cursor})
+
+
+@socketio.on("playback:pause")
+def on_playback_pause(data) -> None:
+    """
+    Pause the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
+    sid = get_request_id()
+    sess = get_session(sid)
+    with sess.lock:
+        sess.paused = True
+
+
+@socketio.on("playback:resume")
+def on_playback_resume(data) -> None:
+    """
+    Resume the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
+    sid = get_request_id()
+    sess = get_session(sid)
+    with sess.lock:
+        sess.paused = False
+    
+    launch_stream(sess)
+
+
+@socketio.on("playback:ack")
+def on_playback_ack(data) -> None:
+    """
+    Handler for client ACK messages
+
+    Acknowleges that the previous frame sent in playback mode was received
+    and processed by the client
+
+    Args:
+        data: data sent from the client
+    """
+    sid = get_request_id()
+    sess = get_session(sid)
+    
+    with sess.lock:
+        sess.awaiting_ack = False
 
 
 @socketio.on("get_run_history")
 def on_get_run_history() -> None:
     """Send current run history to the requesting client."""
-    socketio.emit("run_history_update", {"run_history": get_run_history()})
+    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
+
+
+def _run_ml_loop(ml_host: str) -> None:
+    """
+    Run the ML WebSocket server inside a dedicated asyncio event loop.
+    
+    Args:
+        ml_host: the HTTP host of the websocket
+    """
+    asyncio.set_event_loop(ml_loop)
+    ml_loop.run_until_complete(ml_server(ml_host))
 
 
 def start_local_server(

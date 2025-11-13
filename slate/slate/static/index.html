@@ -39,9 +39,11 @@
               <button id="back_to_live" class="back-to-live-btn">← Back to Live</button>
             </div>
             <div class="playback-buttons">
+              <button id="playback_step_back" class="playback-btn" title="Step backward">⏮</button>
               <button id="playback_play" class="playback-btn">▶</button>
               <button id="playback_pause" class="playback-btn">⏸</button>
-              <button id="playback_stop" class="playback-btn">⏹</button>
+              <button id="playback_stop" class="playback-btn"><strong>⟳</strong></button>
+              <button id="playback_step_forward" class="playback-btn" title="Step forward">⏭</button>
             </div>
           </div>
         </div>
@@ -72,7 +74,7 @@
             <button onclick="sendCommand('step')" title="Execute one step">⏭ Step</button>
             <button onclick="sendCommand('run')" title="Start continuous running">▶ Run</button>
             <button onclick="sendCommand('pause')" title="Pause execution">⏸ Pause</button>
-            <button onclick="sendCommand('reset')" title="Reset environment">🔁 Reset</button>
+            <button onclick="sendCommand('reset')" title="Reset environment"><strong>⟳</strong> Reset</button>
           </div>
 
           <div class="score-box">

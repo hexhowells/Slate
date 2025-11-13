@@ -36,7 +36,12 @@ if __name__ == "__main__":
 
     env = gym.make("ALE/Breakout-v5", render_mode="rgb_array")
     agent = RandomAgent(env)
-    runner = SlateClient(env, agent, checkpoints_dir=args.ckpt_dir)
-    runner.init(endpoint=args.server, run_local=True)
+    runner = SlateClient(
+        env, 
+        agent, 
+        endpoint=args.server, 
+        run_local=True, 
+        checkpoints_dir=args.ckpt_dir
+        )
     runner.start_client()
 
