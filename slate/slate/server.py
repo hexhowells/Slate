@@ -161,7 +161,7 @@ def stream_run(session):
 
                 session.last_sent_cursor = cursor
                 session.cursor += 1
-                session.awaiting_ack = False
+                session.awaiting_ack = True
         
         with session.lock:
             if not session.streaming:
@@ -174,7 +174,14 @@ def stream_run(session):
         
         if (not paused) and (awaiting) and (last_cursor is not None):
             frame_data = run_history.fetch_recording_frame(run_id, last_cursor)
-            socketio.emit("playback:frame", {"frame_data": frame_data, "cursor": last_cursor})
+            if frame_data:
+                socketio.emit("playback:frame", {"frame_data": frame_data, "cursor": last_cursor})
+            else:
+                socketio.emit("playback:error", 
+                            {
+                                  "message": 
+                                  f"No frame could be loaded for cursor position {last_cursor}"
+                            })
         
         time.sleep(0.01)
     
@@ -289,12 +296,14 @@ def on_playback_seek(data) -> None:
     cursor = data.get("frame", None)
     if cursor is None:
         socketio.emit("playback:error", {"message": f"No frame index provided in message."})
+        return
     
     sid = get_request_id()
     sess = get_session(sid)
 
-    if 0 <= cursor < sess.asset['total_steps']:
+    if not (0 <= cursor < sess.asset.get('total_steps', 0)):
         socketio.emit("playback:error", {"message": f"Frame index is out of range for the given video"})
+        return
     
     with sess.lock:
         sess.cursor = cursor
@@ -322,6 +331,8 @@ def on_playback_resume(data) -> None:
     sess = get_session(sid)
     with sess.lock:
         sess.paused = False
+    
+    launch_stream(sess)
 
 
 @socketio.on("playback:ack")
