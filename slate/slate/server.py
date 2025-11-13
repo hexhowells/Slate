@@ -138,11 +138,11 @@ def get_request_id():
     return request.sid  # type: ignore
 
 
-async def stream_run(uuid, start_frame):
+async def stream_run(session):
     while True:
-        frame_data = run_history.fetch_recording_frame(uuid, start_frame)
-        start_frame += 1
-        socketio.emit("run_frame", {"frame_data": frame_data})
+        frame_data = run_history.fetch_recording_frame(session.asset['run_id'], session.cursor)
+        session.cursor += 1
+        socketio.emit("playback:frame", {"frame_data": frame_data, "frame_cursor": 0})
 
 
 @socketio.on("step")
@@ -259,40 +259,6 @@ def on_playback_resume(data) -> None:
 @socketio.on("playback:ack")
 def on_playback_ack(data) -> None:
     pass
-
-
-@socketio.on("playback_run")
-def on_playback_run(data) -> None:
-    """Send playback data for a specific run directly to the requesting client.
-    Uses chunked transfer for large runs to avoid WebSocket size limits.
-    
-    Args:
-        data: Dict containing a `run_id` key with the run identifier.
-    """
-    run_id = data.get("run_id", 0)
-    frame_pointer = data.get("frame", 0)
-
-    if run_history.check_id(run_id):
-        on_pause()
-
-        run_data = run_history.fetch_recording(run_id)
-
-        run_info = {
-            "id": run_data["id"],
-            "timestamp": run_data["timestamp"],
-            "duration": run_data["duration"],
-            "total_steps": run_data["total_steps"],
-            "total_reward": run_data["total_reward"],
-            "checkpoint": run_data["checkpoint"]
-        }
-        socketio.emit("playback_metadata", {"payload": run_info})
-        """
-        1. Check that ML server is paused, if not then pause it
-        2. Check another playback isn't currently in progress, if so, stop it (or change the current frame if the ID is the same)
-        3. Begin a asynchio function to start streaming the run_history given an ID and start time
-        4. That process will remain open and periodically send socketio.emit("playback_frame", data) as a given frame rate
-        5. @socketio.on("playback_pause") - should pause the socketio.emit()
-        """
 
 
 @socketio.on("get_run_history")
