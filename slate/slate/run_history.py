@@ -38,10 +38,33 @@ class RunHistory:
 
     def fetch_recording_frame(self, uuid, frame):
         run = self.run_history[(uuid-1) % self.max_history_size]
-        if 0 <= frame <= len(run):
-            return run[frame]
+        frames = run.get('frames', [])
+        metadata = run.get('metadata', [])
+        
+        if 0 <= frame < len(frames):
+            frame_metadata = metadata[frame] if frame < len(metadata) else {}
+            return {
+                'frame': frames[frame],
+                'reward': frame_metadata.get('reward', 0.0),
+                'done': frame_metadata.get('done', False),
+                'info': frame_metadata.get('info', {}),
+                'q_values': frame_metadata.get('q_values', []),
+                'action': frame_metadata.get('action', ''),
+                'checkpoint': run.get('checkpoint', '')
+            }
         else:
-            return run[0]
+            if len(frames) > 0:
+                first_metadata = metadata[0] if len(metadata) > 0 else {}
+                return {
+                    'frame': frames[0],
+                    'reward': first_metadata.get('reward', 0.0),
+                    'done': first_metadata.get('done', False),
+                    'info': first_metadata.get('info', {}),
+                    'q_values': first_metadata.get('q_values', []),
+                    'action': first_metadata.get('action', ''),
+                    'checkpoint': run.get('checkpoint', '')
+                }
+            return None
     
 
     def new_recording(self, data):
