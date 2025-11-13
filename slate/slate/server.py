@@ -8,6 +8,7 @@ import json
 import websockets
 from pathlib import Path
 import logging
+import time
 
 from slate.run_history import RunHistory
 from slate.session import Session
@@ -140,9 +141,46 @@ def get_request_id():
 
 def stream_run(session):
     while True:
-        frame_data = run_history.fetch_recording_frame(session.asset['run_id'], session.cursor)
-        session.cursor += 1
-        socketio.emit("playback:frame", {"frame_data": frame_data, "frame_cursor": 0})
+        with session.lock:
+            if not session.streaming:
+                break
+
+            if session.paused:
+                pass
+            elif session.awaiting_ack:
+                pass
+            else:
+                run_id = session.asset.get("id")
+                cursor = session.cursor
+
+                total_steps = session.asset.get("total_steps", 0)
+                if cursor >= total_steps:
+                    socketio.emit("playback:eos", {"cursor": cursor})
+                    session.streaming = False
+                    break
+
+                session.last_sent_cursor = cursor
+                session.cursor += 1
+                session.awaiting_ack = False
+        
+        with session.lock:
+            if not session.streaming:
+                break
+
+            paused = session.paused
+            awaiting = session.awaiting_ack
+            last_cursor = session.last_sent_cursor
+            run_id = session.asset.get("id")
+        
+        if (not paused) and (awaiting) and (last_cursor is not None):
+            frame_data = run_history.fetch_recording_frame(run_id, last_cursor)
+            socketio.emit("playback:frame", {"frame_data": frame_data, "cursor": last_cursor})
+        
+        time.sleep(0.01)
+    
+    with session.lock:
+        session.streaming = False
+        session.awaiting_ack = False
 
 
 def launch_stream(session: Session) -> None:
