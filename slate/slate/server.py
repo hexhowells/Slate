@@ -135,11 +135,25 @@ def _send_to_ml(payload: dict) -> None:
         asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
 
 
-def get_request_id():
+def get_request_id() -> str:
+    """
+    Get current socketio SID
+
+    Return:
+        current socketio SID
+    """
     return request.sid  # type: ignore
 
 
-def stream_run(session):
+def stream_run(session: Session) -> None:
+    """
+    Start streaming a run to the client
+
+    Handles interrupts from the client such as pausing, ack, etc
+
+    Args:
+        session: Session object storing information about the current session
+    """
     while True:
         with session.lock:
             if not session.streaming:
@@ -153,7 +167,7 @@ def stream_run(session):
                 run_id = session.asset.get("id")
                 cursor = session.cursor
 
-                total_steps = session.asset.get("total_steps", 0)
+                total_steps: int = session.asset.get("total_steps", 0)
                 if cursor >= total_steps:
                     socketio.emit("playback:eos", {"cursor": cursor})
                     session.streaming = False
@@ -206,7 +220,6 @@ def launch_stream(session: Session) -> None:
 
 @socketio.on("step")
 def on_step() -> None:
-    print(get_request_id())
     """Request a single environment step from the ML runtime."""
     _send_to_ml({"type": "step"})
 
@@ -293,6 +306,12 @@ def on_playback_load(data) -> None:
 
 @socketio.on("playback:seek")
 def on_playback_seek(data) -> None:
+    """
+    Seek to a given frame in the playback video
+
+    Args:
+        data: data sent from the client - including the frame to seek to
+    """
     cursor = data.get("frame", None)
     if cursor is None:
         socketio.emit("playback:error", {"message": f"No frame index provided in message."})
@@ -319,6 +338,12 @@ def on_playback_seek(data) -> None:
 
 @socketio.on("playback:pause")
 def on_playback_pause(data) -> None:
+    """
+    Pause the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
     sid = get_request_id()
     sess = get_session(sid)
     with sess.lock:
@@ -327,6 +352,12 @@ def on_playback_pause(data) -> None:
 
 @socketio.on("playback:resume")
 def on_playback_resume(data) -> None:
+    """
+    Resume the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
     sid = get_request_id()
     sess = get_session(sid)
     with sess.lock:
@@ -337,6 +368,15 @@ def on_playback_resume(data) -> None:
 
 @socketio.on("playback:ack")
 def on_playback_ack(data) -> None:
+    """
+    Handler for client ACK messages
+
+    Acknowleges that the previous frame sent in playback mode was received
+    and processed by the client
+
+    Args:
+        data: data sent from the client
+    """
     sid = get_request_id()
     sess = get_session(sid)
     
@@ -351,7 +391,12 @@ def on_get_run_history() -> None:
 
 
 def _run_ml_loop(ml_host: str) -> None:
-    """Run the ML WebSocket server inside a dedicated asyncio event loop."""
+    """
+    Run the ML WebSocket server inside a dedicated asyncio event loop.
+    
+    Args:
+        ml_host: the HTTP host of the websocket
+    """
     asyncio.set_event_loop(ml_loop)
     ml_loop.run_until_complete(ml_server(ml_host))
 
