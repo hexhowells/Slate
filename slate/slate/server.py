@@ -262,6 +262,10 @@ def on_playback_seek(data) -> None:
         sess.cursor = cursor
         sess.awaiting_ack = False
         sess.last_sent_cursor = None
+        resume_stream = not sess.paused
+    
+    if resume_stream:
+        launch_stream(sess)
     
     socketio.emit("playback:seek:ok", {"cursor": sess.cursor})
 
