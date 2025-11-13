@@ -288,7 +288,11 @@ def on_playback_resume(data) -> None:
 
 @socketio.on("playback:ack")
 def on_playback_ack(data) -> None:
-    pass
+    sid = get_request_id()
+    sess = get_session(sid)
+    
+    with sess.lock:
+        sess.awaiting_ack = False
 
 
 @socketio.on("get_run_history")
