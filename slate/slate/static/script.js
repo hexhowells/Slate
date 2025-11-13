@@ -18,6 +18,7 @@ class SlateViewer {
     this.currentFrameCursor = 0;
     this.isPlaybackPaused = true;
     this.isAwaitingFrame = false;
+    this.shouldPauseAfterFrame = false;
     
     this.initializeEventListeners();
     this.requestCheckpoints();
@@ -262,6 +263,13 @@ class SlateViewer {
     // Send acknowledgment
     this.isAwaitingFrame = false;
     this.socket.emit("playback:ack", {});
+
+    if (this.shouldPauseAfterFrame) {
+      this.shouldPauseAfterFrame = false;
+      setTimeout(() => {
+        this.pausePlayback();
+      }, 50);
+    }
   }
 
   /**
@@ -459,6 +467,72 @@ class SlateViewer {
   }
 
   /**
+   * Step forward one frame
+   */
+  stepForward() {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    // Pause playback if playing
+    if (!this.isPlaybackPaused) {
+      this.pausePlayback();
+    }
+
+    // Step to next frame
+    const nextFrame = Math.min(this.currentFrameCursor + 1, this.currentPlaybackRun.total_steps - 1);
+    this.seekToFrameAndFetch(nextFrame);
+  }
+
+  /**
+   * Step backward one frame
+   */
+  stepBackward() {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    // Pause playback if playing
+    if (!this.isPlaybackPaused) {
+      this.pausePlayback();
+    }
+
+    // Step to previous frame
+    const prevFrame = Math.max(this.currentFrameCursor - 1, 0);
+    this.seekToFrameAndFetch(prevFrame);
+  }
+
+  /**
+   * Seek to a frame and fetch it (for stepping while paused)
+   * @param {number} frameIndex - Frame index to seek to
+   */
+  seekToFrameAndFetch(frameIndex) {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      return;
+    }
+
+    if (frameIndex < 0 || frameIndex >= this.currentPlaybackRun.total_steps) {
+      console.warn("Seek frame out of range:", frameIndex);
+      return;
+    }
+
+    // If paused, we need to briefly resume to get the frame, then pause again
+    if (this.isPlaybackPaused) {
+      // Set a flag to pause after receiving the next frame
+      this.shouldPauseAfterFrame = true;
+      
+      // Seek to the frame
+      this.socket.emit("playback:seek", { frame: frameIndex });
+      
+      // Resume briefly to trigger frame send
+      this.socket.emit("playback:resume", {});
+    } else {
+      // If already playing, just seek
+      this.socket.emit("playback:seek", { frame: frameIndex });
+    }
+  }
+
+  /**
    * Update the info display with current environment data
    * @param {Object} payload - Frame update payload
    */
@@ -597,5 +671,13 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('playback_stop').addEventListener('click', () => {
     slateViewer.stopPlayback();
+  });
+
+  document.getElementById('playback_step_forward').addEventListener('click', () => {
+    slateViewer.stepForward();
+  });
+
+  document.getElementById('playback_step_back').addEventListener('click', () => {
+    slateViewer.stepBackward();
   });
 });
