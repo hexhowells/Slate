@@ -183,7 +183,7 @@ def stream_run(session):
                                   f"No frame could be loaded for cursor position {last_cursor}"
                             })
         
-        time.sleep(0.01)
+        time.sleep(0.1)
     
     with session.lock:
         session.streaming = False
