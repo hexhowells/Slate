@@ -138,11 +138,25 @@ def get_request_id():
     return request.sid  # type: ignore
 
 
-async def stream_run(session):
+def stream_run(session):
     while True:
         frame_data = run_history.fetch_recording_frame(session.asset['run_id'], session.cursor)
         session.cursor += 1
         socketio.emit("playback:frame", {"frame_data": frame_data, "frame_cursor": 0})
+
+
+def launch_stream(session: Session) -> None:
+    """
+    Start video stream if the stream has not already started
+
+    Args:
+        session: Session object containing the session information
+    """
+    with session.lock:
+        if session.streaming:
+            return
+        session.streaming = True
+    socketio.start_background_task(stream_run, session)
 
 
 @socketio.on("step")
