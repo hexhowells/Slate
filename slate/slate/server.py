@@ -244,7 +244,11 @@ def on_playback_seek(data) -> None:
     if 0 <= cursor < sess.asset['total_steps']:
         socketio.emit("playback:error", {"message": f"Frame index is out of range for the given video"})
     
-    sess.cursor = cursor
+    with sess.lock:
+        sess.cursor = cursor
+        sess.awaiting_ack = False
+        sess.last_sent_cursor = None
+    
     socketio.emit("playback:seek:ok", {"cursor": sess.cursor})
 
 
