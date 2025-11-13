@@ -219,7 +219,13 @@ def on_playback_load(data) -> None:
             "total_reward": run_data["total_reward"],
             "checkpoint": run_data["checkpoint"]
         }
-        sess.asset = run_info
+
+        with sess.lock:
+            sess.asset = run_info
+            sess.cursor = 0
+            sess.paused = True
+            sess.awaiting_ack = False
+            sess.last_sent_cursor = None
 
         socketio.emit("playback:loaded", {"payload": run_info})
     else:
