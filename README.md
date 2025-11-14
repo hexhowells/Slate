@@ -2,7 +2,7 @@
   <img src="images/banner.png" alt="Main Slate banner">
 </p>
 
-### Python dashboard for interactive reinforcement learning agents. Slate provides a web-based interface to visualize and control reinforcement learning training runs in real-time.
+Python dashboard for interactive reinforcement learning agents. Slate provides a web-based interface to visualize and control reinforcement learning training runs in real-time.
 
 ## Installation
 
