@@ -1,7 +1,5 @@
 from collections import deque
 from datetime import datetime
-from slate.schemas import FramePayload
-import uuid
 
 
 """
