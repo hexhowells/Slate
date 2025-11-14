@@ -319,7 +319,6 @@ class SlateViewer {
 
     historyList.innerHTML = runHistory.map((run, index) => {
       const timestamp = new Date(run.timestamp).toLocaleTimeString();
-      const duration = Math.round(run.duration);
       return `
         <div class="history-item" onclick="slateViewer.startPlayback(${run.id})">
           <div class="history-item-header">
@@ -328,7 +327,6 @@ class SlateViewer {
           </div>
           <div class="history-item-stats">
             <span>${run.total_steps} steps</span>
-            <span>${duration}s</span>
             <span class="history-item-reward">+${Math.round(run.total_reward)}</span>
           </div>
         </div>

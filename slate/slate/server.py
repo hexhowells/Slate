@@ -286,7 +286,6 @@ def on_playback_load(data) -> None:
         run_info = {
             "id": run_data["id"],
             "timestamp": run_data["timestamp"],
-            "duration": run_data["duration"],
             "total_steps": run_data["total_steps"],
             "total_reward": run_data["total_reward"],
             "checkpoint": run_data["checkpoint"]

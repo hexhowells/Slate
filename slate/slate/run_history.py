@@ -93,7 +93,6 @@ class RunHistory:
         for run in self.run_history:
             metadata.append({
                 'timestamp': run['timestamp'],
-                'duration': run['duration'],
                 'id': run['id'],
                 'total_steps': run['total_steps'],
                 'total_reward': run['total_reward'],
@@ -131,7 +130,6 @@ class Recording:
         return {
             'id': self.run_id,
             'timestamp': self.run_start_time.isoformat(),
-            'duration': (datetime.now() - self.run_start_time).total_seconds(),
             'total_steps': len(self.frames),
             'total_reward': self.total_reward,
             'checkpoint': self.checkpoint,
