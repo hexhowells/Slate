@@ -120,10 +120,11 @@ class SlateClient:
         """
         Stop recording and send the current recording to the server.
         """
-        # Send to server via websocket
-        await self.websocket.send(json.dumps({
-            "type": "run_completed"
-        }))
+        if self.is_recording:
+            await self.websocket.send(json.dumps({
+                "type": "run_completed"
+            }))
+            self.is_recording = False
         
 
     def _record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
@@ -191,8 +192,7 @@ class SlateClient:
             self.info = info
             self.q_values = self.agent.get_q_values()
             self.high_score = max(self.high_score, reward)
-            
-            # Record the step if recording is active
+
             self._record_step(self.current_frame, reward, done, info, self.q_values)
 
         if done:
@@ -283,10 +283,12 @@ class SlateClient:
 
                 match command:
                     case "step":
+                        self.is_recording = True
                         await self._run_step()
                         await self._send_state()
                     case "run":
                         self.running = True
+                        self.is_recording = True
                         if not self.loop_task or self.loop_task.done():
                             self.loop_task = asyncio.create_task(self._run_loop())
                     case "pause":
@@ -296,7 +298,7 @@ class SlateClient:
                         obs, _ = self.env.reset()
                         self.frame_buffer.reset(obs)
                         self.running = False
-                        await self._send_state()
+                        #await self._send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
                         self.agent.load_checkpoint(os.path.join(self.ckpt_dir, self.checkpoint))
