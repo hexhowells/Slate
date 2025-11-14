@@ -8,6 +8,7 @@ import os
 import numpy as np
 import torchvision.transforms as T
 from datetime import datetime
+from torch import Tensor
 
 from .agent import Agent
 from .utils import FrameBuffer
@@ -127,7 +128,13 @@ class SlateClient:
             self.is_recording = False
         
 
-    def _record_step(self, frame: str, reward: float, done: bool, info: dict, q_values: list) -> None:
+    def _record_step(
+            self, 
+            frame: str, 
+            reward: float,
+              done: bool, 
+              info: dict, 
+              q_values: list|Tensor) -> None:
         """
         Record a single step in the current recording.
         
