@@ -313,14 +313,14 @@ def on_playback_seek(data) -> None:
     """
     cursor = data.get("frame", None)
     if cursor is None:
-        socketio.emit("playback:error", {"message": f"No frame index provided in message."})
+        socketio.emit("playback:error", {"message": "No frame index provided in message."})
         return
     
     sid = get_request_id()
     sess = get_session(sid)
 
     if not (0 <= cursor < sess.asset.get('total_steps', 0)):
-        socketio.emit("playback:error", {"message": f"Frame index is out of range for the given video"})
+        socketio.emit("playback:error", {"message": "Frame index is out of range for the given video"})
         return
     
     with sess.lock:
