@@ -23,7 +23,7 @@ class RunHistory:
 
     @property
     def recording(self):
-        return self.current_recording != None
+        return self.current_recording is not None
     
 
     def check_id(self, uuid):
