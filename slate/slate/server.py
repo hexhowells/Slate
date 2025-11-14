@@ -33,7 +33,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 ML_WS_PORT = 8765
 ml_loop = asyncio.new_event_loop()
-ml_clients: set[asyncio.Future] = set()
+ml_clients = set()
 
 MAX_HISTORY_SIZE = 5
 run_history = RunHistory(MAX_HISTORY_SIZE)
