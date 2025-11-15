@@ -319,21 +319,6 @@ button:disabled:hover {
   transition: all 0.2s ease;
 }
 
-.save-button {
-  margin-top: 1rem;
-  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-  border: 2px solid #b8dacc;
-  color: #155724;
-  font-weight: 600;
-  width: 100%;
-}
-
-.save-button:hover {
-  background: linear-gradient(135deg, #c3e6cb 0%, #b8dacc 100%);
-  border-color: #a3d9a4;
-  color: #0f4c1a;
-}
-
 /* History Section */
 .history-section {
   background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
