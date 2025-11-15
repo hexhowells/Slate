@@ -2,12 +2,43 @@ from collections import deque
 from datetime import datetime
 
 
-"""
-recording contains data on:
-    datetime
-    recording buffer
-    current checkpoint
-"""
+class Recording:
+    def __init__(self, uuid, data):
+        self.run_start_time = datetime.now()
+        self.checkpoint = data['checkpoint']
+        self.frames = []
+        self.total_reward = 0.0
+        self.run_id = uuid
+        self.metadata = []
+
+        self.add_frame(data)
+    
+
+    def add_frame(self, data):
+        self.frames.append(data['frame'])
+        self.total_reward += max(0, data['reward'])
+        self.metadata.append({
+            'reward': data['reward'],
+            'done': data['done'],
+            'info': data['info'],
+            'q_values': data['q_values'],
+            'action': data['action'],
+            'timestep': datetime.now().isoformat()
+        })
+
+
+    def get_recording(self):
+        return {
+            'id': self.run_id,
+            'timestamp': self.run_start_time.isoformat(),
+            'total_steps': len(self.frames),
+            'total_reward': self.total_reward,
+            'checkpoint': self.checkpoint,
+            'frames': self.frames,
+            'metadata': self.metadata
+        }
+    
+
 class RunHistory:
     def __init__(self, max_history_size: int=5) -> None:
         """
@@ -30,7 +61,7 @@ class RunHistory:
         return uuid in self.recording_ids
     
 
-    def fetch_recording(self, uuid):
+    def fetch_recording(self, uuid) -> Recording:
         return self.run_history[(uuid-1) % self.max_history_size]
     
 
@@ -97,40 +128,3 @@ class RunHistory:
             })
         
         return metadata
-
-
-class Recording:
-    def __init__(self, uuid, data):
-        self.run_start_time = datetime.now()
-        self.checkpoint = data['checkpoint']
-        self.frames = []
-        self.total_reward = 0.0
-        self.run_id = uuid
-        self.metadata = []
-
-        self.add_frame(data)
-    
-
-    def add_frame(self, data):
-        self.frames.append(data['frame'])
-        self.total_reward += max(0, data['reward'])
-        self.metadata.append({
-            'reward': data['reward'],
-            'done': data['done'],
-            'info': data['info'],
-            'q_values': data['q_values'],
-            'action': data['action'],
-            'timestep': datetime.now().isoformat()
-        })
-
-
-    def get_recording(self):
-        return {
-            'id': self.run_id,
-            'timestamp': self.run_start_time.isoformat(),
-            'total_steps': len(self.frames),
-            'total_reward': self.total_reward,
-            'checkpoint': self.checkpoint,
-            'frames': self.frames,
-            'metadata': self.metadata
-        }
