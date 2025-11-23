@@ -274,7 +274,7 @@ def download_playback(run_id: int):
     return send_file(
         BytesIO(video_bytes),
         as_attachment=True,
-        download_name=f"{run_id}.s4",
+        download_name=f"slate_run_{run_id}.s4",
     )
 
 
