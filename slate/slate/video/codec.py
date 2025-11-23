@@ -14,21 +14,15 @@ def delta_encode_frames(frames: list[str]) -> bytes:
         byte stream of compressed frames
     """
     frame_stream = io.BytesIO()
-
-    raw_size = 0
-    compressed_size = 0
     
     prev_frame_bytes = frames[0].encode('utf-8')
-    raw_size += len(prev_frame_bytes)
     compressed_first = zlib.compress(prev_frame_bytes)
-    compressed_size += len(compressed_first)
     
     frame_stream.write(struct.pack('<I', len(compressed_first)))
     frame_stream.write(compressed_first)
 
     for frame in frames[1:]:
         frame_bytes = frame.encode('utf-8')
-        raw_size += len(frame_bytes)
         
         # delta-encode frame
         max_len = max(len(prev_frame_bytes), len(frame_bytes))
@@ -38,7 +32,6 @@ def delta_encode_frames(frames: list[str]) -> bytes:
         frame_delta = bytes((p - c) % 256 for p, c in zip(prev_padded, curr_padded))
         
         compressed_delta = zlib.compress(frame_delta)
-        compressed_size += len(compressed_delta)
         
         # write frame header
         frame_stream.write(struct.pack('<I', len(frame_bytes)))  # used for decoding
@@ -48,8 +41,6 @@ def delta_encode_frames(frames: list[str]) -> bytes:
         frame_stream.write(compressed_delta)
         
         prev_frame_bytes = frame_bytes
-    
-    print(f'Raw size: {raw_size}\nCompressed size: {compressed_size}')
 
     return frame_stream.getvalue()
 
