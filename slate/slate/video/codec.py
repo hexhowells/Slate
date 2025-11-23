@@ -167,7 +167,7 @@ def encode_video_to_s4(recording: dict) -> bytes:
         buf.write(struct.pack('<B', len(q_values)))
 
         for q_val in q_values:
-            q_int = int(float(q_val) * 100)
+            q_int = int(round(q_val * 100))
             buf.write(struct.pack('<h', q_int))
     
     return buf.getvalue()
