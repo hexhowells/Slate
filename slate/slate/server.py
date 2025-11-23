@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, send_from_directory, request
+from flask import Flask, send_from_directory, request, send_file
 from flask_socketio import SocketIO
 import asyncio
 import threading
@@ -9,9 +9,11 @@ import websockets
 from pathlib import Path
 import logging
 import time
+from io import BytesIO
 
 from slate.run_history import RunHistory
 from slate.session import Session
+from slate.video.codec import encode_video_to_s4
 
 logging.getLogger('werkzeug').disabled = True
 
@@ -184,7 +186,7 @@ def stream_run(session: Session) -> None:
             paused = session.paused
             awaiting = session.awaiting_ack
             last_cursor = session.last_sent_cursor
-            run_id = session.asset.get("id")
+            run_id = session.asset.get("id", 0)
         
         if (not paused) and (awaiting) and (last_cursor is not None):
             frame_data = run_history.fetch_recording_frame(run_id, last_cursor)
@@ -262,6 +264,39 @@ def on_send_checkpoints() -> None:
 def on_send_run_history() -> None:
     """Request the run history from the ML runtime."""
     _send_to_ml({"type": "send_run_history"})
+
+
+@app.route("/playback/<run_id>")
+def download_playback(run_id: int):
+    run_data = run_history.fetch_recording(int(run_id))
+    video_bytes = encode_video_to_s4(run_data)
+
+    return send_file(
+        BytesIO(video_bytes),
+        as_attachment=True,
+        download_name=f"{run_id}.s4",
+    )
+
+
+@socketio.on("playback:save")
+def on_playback_save(data) -> None:
+    """
+    Generate a download id to download a playback video from
+
+    Args:
+        data: data sent from the client
+    """
+    sid = get_request_id()
+    sess = get_session(sid)
+
+    run_id = sess.asset["id"]
+
+    download_url = f"/playback/{run_id}"
+
+    socketio.emit(
+        "playback:save:ready",
+        {"run_id": run_id, "download_url": download_url}
+    )
 
 
 @socketio.on("playback:load")

@@ -421,6 +421,21 @@ button:disabled:hover {
   font-size: 0.85rem;
 }
 
+.save-run-btn {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border: 1px solid #c3e6cb;
+  color: #155724;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.save-run-btn:hover {
+  background: linear-gradient(135deg, #c3e6cb 0%, #b1dfbb 100%);
+  border-color: #b1dfbb;
+}
+
 .back-to-live-btn {
   background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
   border: 1px solid #bee5eb;

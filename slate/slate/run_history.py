@@ -1,13 +1,45 @@
 from collections import deque
 from datetime import datetime
+from typing import Any
 
 
-"""
-recording contains data on:
-    datetime
-    recording buffer
-    current checkpoint
-"""
+class Recording:
+    def __init__(self, uuid: int, data: dict):
+        self.run_start_time = datetime.now()
+        self.checkpoint = data['checkpoint']
+        self.frames = []
+        self.total_reward = 0.0
+        self.run_id = uuid
+        self.metadata = []
+
+        self.add_frame(data)
+    
+
+    def add_frame(self, data: dict[str, Any]) -> None:
+        self.frames.append(data['frame'])
+        self.total_reward += max(0.0, data['reward'])
+        self.metadata.append({
+            'reward': data['reward'],
+            'done': data['done'],
+            'info': data['info'],
+            'q_values': data['q_values'],
+            'action': data['action'],
+            'timestep': datetime.now().isoformat()
+        })
+
+
+    def get_recording(self) -> dict[str, Any]:
+        return {
+            'id': self.run_id,
+            'timestamp': self.run_start_time.isoformat(),
+            'total_steps': len(self.frames),
+            'total_reward': self.total_reward,
+            'checkpoint': self.checkpoint,
+            'frames': self.frames,
+            'metadata': self.metadata
+        }
+    
+
 class RunHistory:
     def __init__(self, max_history_size: int=5) -> None:
         """
@@ -22,27 +54,27 @@ class RunHistory:
     
 
     @property
-    def recording(self):
+    def recording(self) -> bool:
         return self.current_recording is not None
     
 
-    def check_id(self, uuid):
+    def check_id(self, uuid: int) -> bool:
         return uuid in self.recording_ids
     
 
-    def fetch_recording(self, uuid):
+    def fetch_recording(self, uuid: int) -> dict[str, Any]:
         return self.run_history[(uuid-1) % self.max_history_size]
     
 
-    def fetch_recording_frame(self, uuid, frame):
+    def fetch_recording_frame(self, uuid: int, frame_idx: int) -> dict|None:
         run = self.run_history[(uuid-1) % self.max_history_size]
         frames = run.get('frames', [])
         metadata = run.get('metadata', [])
         
-        if 0 <= frame < len(frames):
-            frame_metadata = metadata[frame] if frame < len(metadata) else {}
+        if 0 <= frame_idx < len(frames):
+            frame_metadata = metadata[frame_idx] if frame_idx < len(metadata) else {}
             return {
-                'frame': frames[frame],
+                'frame': frames[frame_idx],
                 'reward': frame_metadata.get('reward', 0.0),
                 'done': frame_metadata.get('done', False),
                 'info': frame_metadata.get('info', {}),
@@ -65,28 +97,28 @@ class RunHistory:
             return None
     
 
-    def new_recording(self, data):
+    def new_recording(self, data: dict) -> None:
         self.current_recording = Recording(self.recording_num, data)
         self.recording_ids.append(self.recording_num)
         self.recording_num += 1
 
 
-    def update_recording(self, data):
+    def update_recording(self, data: dict) -> None:
         assert self.current_recording, "Cannot call update_recording - No current recording setup in RunHistory"
         self.current_recording.add_frame(data)
 
 
-    def stop_recording(self):
+    def stop_recording(self) -> None:
         assert self.current_recording, "Cannot call stopc_recording - No current recording setup in RunHistory"
         self.run_history.append(self.current_recording.get_recording())
         self.current_recording = None
 
     
-    def get_run_history(self):
+    def get_run_history(self) -> list[deque]:
         return list(self.run_history)
     
 
-    def get_history_metadata(self):
+    def get_history_metadata(self) -> list[dict]:
         metadata = []
         for run in self.run_history:
             metadata.append({
@@ -97,40 +129,3 @@ class RunHistory:
             })
         
         return metadata
-
-
-class Recording:
-    def __init__(self, uuid, data):
-        self.run_start_time = datetime.now()
-        self.checkpoint = data['checkpoint']
-        self.frames = []
-        self.total_reward = 0.0
-        self.run_id = uuid
-        self.metadata = []
-
-        self.add_frame(data)
-    
-
-    def add_frame(self, data):
-        self.frames.append(data['frame'])
-        self.total_reward += max(0, data['reward'])
-        self.metadata.append({
-            'reward': data['reward'],
-            'done': data['done'],
-            'info': data['info'],
-            'q_values': data['q_values'],
-            'action': data['action'],
-            'timestep': datetime.now().isoformat()
-        })
-
-
-    def get_recording(self):
-        return {
-            'id': self.run_id,
-            'timestamp': self.run_start_time.isoformat(),
-            'total_steps': len(self.frames),
-            'total_reward': self.total_reward,
-            'checkpoint': self.checkpoint,
-            'frames': self.frames,
-            'metadata': self.metadata
-        }

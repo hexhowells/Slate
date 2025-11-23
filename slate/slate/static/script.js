@@ -76,6 +76,10 @@ class SlateViewer {
     this.socket.on("playback:seek:ok", (msg) => {
       this.handlePlaybackSeekOk(msg);
     });
+
+    this.socket.on("playback:save:ready", (msg) => {
+      this.handlePlaybackSaveReady(msg);
+    });
   }
 
   /**
@@ -303,6 +307,37 @@ class SlateViewer {
   handlePlaybackSeekOk(msg) {
     console.log("Seek successful, cursor:", msg.cursor);
     this.currentFrameCursor = msg.cursor;
+  }
+
+  /**
+   * Handle playback save ready event
+   * @param {Object} msg - Message containing download URL
+   */
+  handlePlaybackSaveReady(msg) {
+    console.log("Playback save ready:", msg);
+    const downloadUrl = msg.download_url;
+    if (downloadUrl) {
+      // Trigger download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${msg.run_id}.s4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }
+
+  /**
+   * Save the current playback run
+   */
+  savePlaybackRun() {
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
+      console.warn("Cannot save: not in playback mode or no run selected");
+      return;
+    }
+
+    console.log("Saving playback run:", this.currentPlaybackRun.id);
+    this.socket.emit("playback:save", {});
   }
 
   /**
@@ -677,5 +712,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('playback_step_back').addEventListener('click', () => {
     slateViewer.stepBackward();
+  });
+
+  document.getElementById('save_run').addEventListener('click', () => {
+    slateViewer.savePlaybackRun();
   });
 });
