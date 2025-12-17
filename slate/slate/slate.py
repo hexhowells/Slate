@@ -11,7 +11,7 @@ from datetime import datetime
 from torch import Tensor
 
 from .agent import Agent
-from .utils import FrameBuffer
+from .utils import FrameBuffer, NumpyEncoder
 
 
 default_transform = transform = T.Compose([
@@ -229,7 +229,8 @@ class SlateClient:
                     "high_score": self.high_score,
                     "checkpoint": self.checkpoint
                 }
-            }))
+            },
+            cls = NumpyEncoder))
     
 
     async def _run_loop(self) -> None:
