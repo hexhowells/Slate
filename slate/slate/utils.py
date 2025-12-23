@@ -2,6 +2,7 @@ import torch
 from collections import deque
 import json
 import numpy as np
+import torch
 
 
 class FrameBuffer:
@@ -38,4 +39,8 @@ class NumpyEncoder(json.JSONEncoder):
             return float(o)
         if isinstance(o, np.ndarray):
             return o.tolist()
-        return super(NumpyEncoder, self).default(o)
+        if isinstance(o, torch.Tensor):
+            return o.detach().cpu().tolist()
+        if isinstance(o, torch.dtype):
+              return str(o)
+        return super().default(o)
