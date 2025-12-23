@@ -11,7 +11,7 @@ from datetime import datetime
 from torch import Tensor
 
 from .agent import Agent
-from .utils import FrameBuffer, NumpyEncoder
+from .utils import NumpyEncoder
 
 
 default_transform = transform = T.Compose([
@@ -65,7 +65,7 @@ class SlateClient:
         self.ws_endpoint = "ws://localhost:8765"
         self.ui_endpoint = endpoint or "127.0.0.1"
 
-        obs, _ = self.env.reset()
+        self.obs, _ = self.env.reset()
         self.current_frame = None
         self.q_values = []
         self.action_str = "None"
@@ -85,9 +85,6 @@ class SlateClient:
         self.current_recording: list[dict] = []
         self.is_recording = False
         self.run_start_time = None
-
-        # frame buffer
-        self.frame_buffer = FrameBuffer(obs, buffer_len, transform)
 
 
     def _rescan_checkpoints(self) -> None:
@@ -185,9 +182,9 @@ class SlateClient:
             Any exception from the environment or rendering is propagated
         """
         frame = self.env.render()
-        action = self.agent.get_action(self.frame_buffer.state())
+        action = self.agent.get_action(self.obs)
         obs, reward, done, truncated, info = self.env.step(action)
-        self.frame_buffer.append(obs)
+        self.obs = obs
 
         self.action_str = self.action_meanings[action]
 
@@ -278,7 +275,6 @@ class SlateClient:
         """
         self.websocket = websocket
         print("[SlateRunner] connected to Slate server")
-        #await self._send_state()
         await self._send_checkpoints()
 
         if self.ckpt_dir:
@@ -304,9 +300,7 @@ class SlateClient:
                     case "reset":
                         await self._stop_recording()
                         obs, _ = self.env.reset()
-                        self.frame_buffer.reset(obs)
                         self.running = False
-                        #await self._send_state()
                     case "select_checkpoint":
                         self.checkpoint = data.get("checkpoint", "")
                         self.agent.load_checkpoint(os.path.join(self.ckpt_dir, self.checkpoint))
