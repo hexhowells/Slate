@@ -6,7 +6,6 @@ import websockets
 import threading
 import os
 import numpy as np
-import torchvision.transforms as T
 from datetime import datetime
 from torch import Tensor
 
