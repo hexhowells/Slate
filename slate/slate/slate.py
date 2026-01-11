@@ -14,12 +14,6 @@ from .agent import Agent
 from .utils import NumpyEncoder
 
 
-default_transform = transform = T.Compose([
-	T.ToPILImage(),
-	T.ToTensor()
-])
-
-
 class SlateClient:
     """
     Handles real-time interaction between a reinforcement learning environment, an agent,
@@ -31,7 +25,6 @@ class SlateClient:
         endpoint: the server endpoint that the client with connect to
         run_local: whether to run the slate server locally or connect to a cloud server
         frame_rate: Delay (in seconds) between steps during continuous run
-        transform: Optional transform function to transform the input frames
         checkpoints_dir: the directory which the agent checkpoints are stored
 
     Attributes:
@@ -50,7 +43,6 @@ class SlateClient:
             endpoint: str|None = None,
             run_local: bool = False,
             frame_rate: float=0.1,
-            transform=default_transform,
             checkpoints_dir: str = ""
         ) -> None:
         self.env = env
