@@ -221,25 +221,25 @@ def launch_stream(session: Session) -> None:
 
 
 @socketio.on("step")
-def on_step() -> None:
+def on_step(_data=None) -> None:
     """Request a single environment step from the ML runtime."""
     _send_to_ml({"type": "step"})
 
 
 @socketio.on("run")
-def on_run() -> None:
+def on_run(_data=None) -> None:
     """Start continuous stepping on the ML runtime."""
     _send_to_ml({"type": "run"})
 
 
 @socketio.on("pause")
-def on_pause() -> None:
+def on_pause(_data=None) -> None:
     """Pause continuous stepping on the ML runtime."""
     _send_to_ml({"type": "pause"})
 
 
 @socketio.on("reset")
-def on_reset() -> None:
+def on_reset(_data=None) -> None:
     """Reset the environment on the ML runtime."""
     _send_to_ml({"type": "reset"})
 
@@ -255,13 +255,13 @@ def on_select_checkpoint(data) -> None:
 
 
 @socketio.on("send_checkpoints")
-def on_send_checkpoints() -> None:
+def on_send_checkpoints(_data=None) -> None:
     """Request the list of available checkpoints from the ML runtime."""
     _send_to_ml({"type": "send_checkpoints"})
 
 
 @socketio.on("send_run_history")
-def on_send_run_history() -> None:
+def on_send_run_history(_data=None) -> None:
     """Request the run history from the ML runtime."""
     _send_to_ml({"type": "send_run_history"})
 
@@ -419,7 +419,7 @@ def on_playback_ack(data) -> None:
 
 
 @socketio.on("get_run_history")
-def on_get_run_history() -> None:
+def on_get_run_history(_data=None) -> None:
     """Send current run history to the requesting client."""
     socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
 
