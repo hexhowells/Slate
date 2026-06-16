@@ -17,7 +17,7 @@ class RandomAgent(Agent):
         return super().load_checkpoint(checkpoint)
 
     def get_q_values(self):
-        return np.random.rand(env.action_space.n).tolist()
+        return np.random.rand(env.action_space.n).tolist()  # type: ignore
 
 
 if __name__ == "__main__":
