@@ -49,7 +49,8 @@ app = Flask(
 
 @app.route("/")
 def index() -> Response:
-    """Serve the dashboard and request the latest checkpoints from the ML side.
+    """
+    Serve the dashboard and request the latest checkpoints from the ML side.
 
     Returns:
         A Flask response that serves `index.html` from the resolved static dir.
@@ -106,7 +107,8 @@ def get_session(sid: str) -> Session:
 
 
 async def _send_to_ml(payload: dict) -> None:
-    """Send a JSON payload to all connected ML runtime WebSocket clients.
+    """
+    Send a JSON payload to all connected ML runtime WebSocket clients.
 
     Args:
         payload: Dictionary that will be JSON-encoded and sent.
