@@ -17,6 +17,7 @@ import threading
 from slate.run_history import RunHistory
 from slate.session import Session
 from slate.video.codec import encode_video_to_s4
+from slate.router import Router
 
 logging.getLogger('werkzeug').disabled = True
 
@@ -37,6 +38,8 @@ web_clients: dict[ServerConnection, sid] = {}
 sessions: dict[sid, Session] = {}
 
 run_history = RunHistory(max_history_size=5)
+
+router = Router()
 
 app = Flask(
     __name__,
@@ -202,95 +205,197 @@ async def web_handler(ws: ServerConnection) -> None:
     """
     sid = str(uuid.uuid4())
     web_clients[ws] = sid
-    sess = get_session(sid)
     
     try:
         async for msg in ws:
             data = json.loads(msg)
             msg_type = data.get("type")
-
-            match msg_type:
-                case "step" | "run" | "pause" | "reset" | "send_checkpoints" | "send_run_history":
-                    await _send_to_ml({"type": msg_type})
-                
-                case "select_checkpoint":
-                    await _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
-                
-                case "playback:save":
-                    run_id = sess.asset["id"]
-                    await ws.send(json.dumps({
-                        "type": "playback:save:ready", 
-                        "run_id": run_id, 
-                        "download_url": f"/playback/{run_id}"
-                    }))
-                
-                case "playback:load":
-                    run_id = data.get("run_id", 0)
-                    if run_history.check_id(run_id):
-                        await _send_to_ml({"type": "pause"})
-                        run_data = run_history.fetch_recording(run_id)
-                        run_info = {
-                            "id": run_data["id"],
-                            "timestamp": run_data["timestamp"],
-                            "total_steps": run_data["total_steps"],
-                            "total_reward": run_data["total_reward"],
-                            "checkpoint": run_data["checkpoint"]
-                        }
-                        with sess.lock:
-                            sess.asset = run_info
-                            sess.cursor = 0
-                            sess.paused = True
-                            sess.awaiting_ack = False
-                            sess.last_sent_cursor = None
-                        await ws.send(json.dumps({"type": "playback:loaded", "payload": run_info}))
-                    else:
-                        await ws.send(json.dumps({"type": "playback:error", "message": f"Run ID {run_id} not found."}))
-                
-                case "playback:seek":
-                    cursor = data.get("frame")
-                    if cursor is None:
-                        await ws.send(json.dumps({"type": "playback:error", "message": "No frame index provided."}))
-                        continue
-                    
-                    if not (0 <= cursor < sess.asset.get('total_steps', 0)):
-                        await ws.send(json.dumps({"type": "playback:error", "message": "Frame index out of range."}))
-                        continue
-                    
-                    with sess.lock:
-                        sess.cursor = cursor
-                        sess.awaiting_ack = False
-                        sess.last_sent_cursor = None
-                        resume_stream = not sess.paused
-                    
-                    if resume_stream:
-                        await launch_stream(sess, ws)
-                    
-                    await ws.send(json.dumps({"type": "playback:seek:ok", "cursor": sess.cursor}))
-                
-                case "playback:pause":
-                    with sess.lock:
-                        sess.paused = True
-                        
-                case "playback:resume":
-                    with sess.lock:
-                        sess.paused = False
-                    await launch_stream(sess, ws)
-                    
-                case "playback:ack":
-                    with sess.lock:
-                        sess.awaiting_ack = False
-                        
-                case "get_run_history":
-                    await ws.send(json.dumps({
-                        "type": "run_history_update", 
-                        "run_history": run_history.get_history_metadata()
-                    }))
-                    
-                case _:
-                    logging.warning(f"Unknown web msg: {msg_type}")
-                    
+            await router.dispatch(msg_type, sid, ws, data)
     finally:
         del web_clients[ws]
+
+
+@router.on("step")
+async def on_step(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Request a single environment step from the ML runtime."""
+    await _send_to_ml({"type": "step"})
+
+
+@router.on("run")
+async def on_run(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Start continuous stepping on the ML runtime."""
+    await _send_to_ml({"type": "run"})
+
+
+@router.on("pause")
+async def on_pause(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Pause continuous stepping on the ML runtime."""
+    await _send_to_ml({"type": "pause"})
+
+
+@router.on("reset")
+async def on_reset(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Reset the environment on the ML runtime."""
+    await _send_to_ml({"type": "reset"})
+
+
+@router.on("select_checkpoint")
+async def on_select_checkpoint(sid: str, ws: ServerConnection, data) -> None:
+    """Ask the ML runtime to load a specific checkpoint.
+
+    Args:
+        data: Dict containing a `checkpoint` key with the identifier/path.
+    """
+    await _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
+
+
+@router.on("send_checkpoints")
+async def on_send_checkpoints(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Request the list of available checkpoints from the ML runtime."""
+    await _send_to_ml({"type": "send_checkpoints"})
+
+
+@router.on("send_run_history")
+async def on_send_run_history(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Request the run history from the ML runtime."""
+    await _send_to_ml({"type": "send_run_history"})
+
+
+@router.on("playback:save")
+async def on_playback_save(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Generate a download id to download a playback video from
+
+    Args:
+        data: data sent from the client
+    """
+    sess = get_session(sid)
+
+    run_id = sess.asset["id"]
+    await ws.send(json.dumps({
+        "type": "playback:save:ready", 
+        "run_id": run_id, 
+        "download_url": f"/playback/{run_id}"
+    }))
+
+
+@router.on("playback:load")
+async def on_playback_load(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Load a playback video given an run ID
+
+    Verifies the run ID is valid and returns the run metadata to the client
+
+    Args:
+        data: Dict containing a `run_id` key with the run identifier.
+    """
+    sess = get_session(sid)
+
+    run_id = data.get("run_id", 0)
+    if run_history.check_id(run_id):
+        await _send_to_ml({"type": "pause"})
+        run_data = run_history.fetch_recording(run_id)
+        run_info = {
+            "id": run_data["id"],
+            "timestamp": run_data["timestamp"],
+            "total_steps": run_data["total_steps"],
+            "total_reward": run_data["total_reward"],
+            "checkpoint": run_data["checkpoint"]
+        }
+        with sess.lock:
+            sess.asset = run_info
+            sess.cursor = 0
+            sess.paused = True
+            sess.awaiting_ack = False
+            sess.last_sent_cursor = None
+        await ws.send(json.dumps({"type": "playback:loaded", "payload": run_info}))
+    else:
+        await ws.send(json.dumps({"type": "playback:error", "message": f"Run ID {run_id} not found."}))
+
+
+@router.on("playback:seek")
+async def on_playback_seek(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Seek to a given frame in the playback video
+
+    Args:
+        data: data sent from the client - including the frame to seek to
+    """
+    sess = get_session(sid)
+
+    cursor = data.get("frame")
+    if cursor is None:
+        await ws.send(json.dumps({"type": "playback:error", "message": "No frame index provided."}))
+        return
+    
+    if not (0 <= cursor < sess.asset.get('total_steps', 0)):
+        await ws.send(json.dumps({"type": "playback:error", "message": "Frame index out of range."}))
+        return
+    
+    with sess.lock:
+        sess.cursor = cursor
+        sess.awaiting_ack = False
+        sess.last_sent_cursor = None
+        resume_stream = not sess.paused
+    
+    if resume_stream:
+        await launch_stream(sess, ws)
+    
+    await ws.send(json.dumps({"type": "playback:seek:ok", "cursor": sess.cursor}))
+
+
+@router.on("playback:pause")
+async def on_playback_pause(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Pause the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
+    sess = get_session(sid)
+    with sess.lock:
+        sess.paused = True
+
+
+@router.on("playback:resume")
+async def on_playback_resume(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Resume the current VOD stream
+
+    Args:
+        data: data sent from the client
+    """
+    sess = get_session(sid)
+    with sess.lock:
+        sess.paused = False
+    
+    await launch_stream(sess, ws)
+
+
+@router.on("playback:ack")
+async def on_playback_ack(sid: str, ws: ServerConnection, data) -> None:
+    """
+    Handler for client ACK messages
+
+    Acknowleges that the previous frame sent in playback mode was received
+    and processed by the client
+
+    Args:
+        data: data sent from the client
+    """
+    sess = get_session(sid)
+    
+    with sess.lock:
+        sess.awaiting_ack = False
+
+
+@router.on("get_run_history")
+async def on_get_run_history(sid: str, ws: ServerConnection, _data=None) -> None:
+    """Send current run history to the requesting client."""
+    await ws.send(json.dumps({
+        "type": "run_history_update", 
+        "run_history": run_history.get_history_metadata()
+    }))
 
 
 async def ml_handler(ws: ServerConnection) -> None:
