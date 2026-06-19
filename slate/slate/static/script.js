@@ -8,7 +8,7 @@ class SlateViewer {
     this.ws = null;
     this.reconnectDelay = 1000;
     this.maxReconnectDelay = 30000;
-    this.wsPort = 8766; // The dedicated Web WebSocket port
+    this.wsPort = 8000;
     
     this.cumulativeScore = 0;
     this.checkpointRetryCount = 0;
@@ -32,7 +32,7 @@ class SlateViewer {
    * Establish native WebSocket connection with auto-reconnect logic
    */
   connect() {
-    const wsUrl = `ws://${window.location.hostname}:${this.wsPort}`;
+    const wsUrl = `ws://${window.location.hostname}:${this.wsPort}/ws/ui`;
     console.log(`Connecting to Slate Web Server at ${wsUrl}`);
     this.updateConnectionStatus('connecting', 'Connecting...');
     
