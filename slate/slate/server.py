@@ -99,16 +99,23 @@ async def _send_to_ml(payload: dict) -> None:
     """
     if not ml_clients:
         return
+        
     txt = json.dumps(payload)
-    disconnected = set()
     
-    for ws in ml_clients:
-        try:
-            await ws.send_text(txt)
-        except WebSocketDisconnect:
-            disconnected.add(ws)
+    clients_list = list(ml_clients)
+    
+    results = await asyncio.gather(
+        *(ws.send_text(txt) for ws in clients_list),
+        return_exceptions=True
+    )
+    
+    disconnected = {
+        ws for ws, result in zip(clients_list, results) 
+        if isinstance(result, Exception)
+    }
             
-    ml_clients.difference_update(disconnected)
+    if disconnected:
+        ml_clients.difference_update(disconnected)
 
 
 async def _broadcast_to_web(payload: dict) -> None:
@@ -121,16 +128,15 @@ async def _broadcast_to_web(payload: dict) -> None:
     if not web_clients:
         return
     txt = json.dumps(payload)
-    disconnected = []
     
-    for ws in web_clients.keys():
-        try:
-            await ws.send_text(txt)
-        except WebSocketDisconnect:
-            disconnected.append(ws)
-            
-    for ws in disconnected:
-        web_clients.pop(ws, None)
+    results = await asyncio.gather(
+        *(ws.send_text(txt) for ws in web_clients.keys()),
+        return_exceptions=True
+    )
+    
+    for ws, result in zip(web_clients.keys(), results):
+        if isinstance(result, Exception):
+            web_clients.pop(ws, None)
 
 
 async def stream_run(session: Session, ws: WebSocket) -> None:
