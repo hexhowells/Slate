@@ -51,8 +51,9 @@ class SlateClient:
         self.step_mode = False
         self.state_lock = threading.Lock()
         self.loop_task = None
-        self.ws_endpoint = "ws://localhost:8765"
+        
         self.ui_endpoint = endpoint or "127.0.0.1"
+        self.ws_endpoint = f"ws://{self.ui_endpoint}:8000/ws/ml"
 
         self.obs, _ = self.env.reset()
         self.current_frame = None
@@ -331,4 +332,3 @@ class SlateClient:
                 print(f"[Slate] Failed to start local server: {e}")
         
         asyncio.run(self._dial_and_serve(self.ws_endpoint))
-    

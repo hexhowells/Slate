@@ -5,7 +5,11 @@
 
 class SlateViewer {
   constructor() {
-    this.socket = io();
+    this.ws = null;
+    this.reconnectDelay = 1000;
+    this.maxReconnectDelay = 30000;
+    this.wsPort = 8000;
+    
     this.cumulativeScore = 0;
     this.checkpointRetryCount = 0;
     this.maxRetries = 5;
@@ -20,66 +24,92 @@ class SlateViewer {
     this.isAwaitingFrame = false;
     this.shouldPauseAfterFrame = false;
     
-    this.initializeEventListeners();
-    this.requestCheckpoints();
-    this.requestRunHistory();
+    this.connect();
     this.scheduleRetry();
   }
 
   /**
-   * Initialize all Socket.IO event listeners
+   * Establish native WebSocket connection with auto-reconnect logic
    */
-  initializeEventListeners() {
-    this.socket.on("connect", () => {
+  connect() {
+    const wsUrl = `ws://${window.location.hostname}:${this.wsPort}/ws/ui`;
+    console.log(`Connecting to Slate Web Server at ${wsUrl}`);
+    this.updateConnectionStatus('connecting', 'Connecting...');
+    
+    this.ws = new WebSocket(wsUrl);
+
+    this.ws.onopen = () => {
       console.log("Socket connected, requesting checkpoints and run history");
       this.updateConnectionStatus('connected', 'Connected');
+      this.reconnectDelay = 1000; // Reset backoff
       this.checkpointsReceived = false;
       this.checkpointRetryCount = 0;
       this.requestCheckpoints();
       this.requestRunHistory();
-    });
+    };
 
-    this.socket.on("disconnect", () => {
+    this.ws.onclose = () => {
       console.log("Socket disconnected");
       this.updateConnectionStatus('disconnected', 'Disconnected');
       this.checkpointsReceived = false;
-    });
+      
+      // Auto-reconnect with exponential backoff
+      setTimeout(() => this.connect(), this.reconnectDelay);
+      this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, this.maxReconnectDelay);
+    };
 
-    this.socket.on("checkpoints_update", (msg) => {
-      this.handleCheckpointsUpdate(msg);
-    });
+    this.ws.onerror = (error) => {
+      console.error("WebSocket Error:", error);
+      // onclose will trigger immediately after this to handle reconnect
+    };
 
-    this.socket.on("frame_update", (msg) => {
-      this.handleFrameUpdate(msg);
-    });
+    this.ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const msgType = data.type;
 
-    this.socket.on("run_history_update", (msg) => {
-      this.handleRunHistoryUpdate(msg);
-    });
+      switch (msgType) {
+        case "checkpoints_update":
+          this.handleCheckpointsUpdate(data);
+          break;
+        case "frame_update":
+          this.handleFrameUpdate(data);
+          break;
+        case "run_history_update":
+          this.handleRunHistoryUpdate(data);
+          break;
+        case "playback:loaded":
+          this.handlePlaybackLoaded(data);
+          break;
+        case "playback:frame":
+          this.handlePlaybackFrame(data);
+          break;
+        case "playback:eos":
+          this.handlePlaybackEOS(data);
+          break;
+        case "playback:error":
+          this.handlePlaybackError(data);
+          break;
+        case "playback:seek:ok":
+          this.handlePlaybackSeekOk(data);
+          break;
+        case "playback:save:ready":
+          this.handlePlaybackSaveReady(data);
+          break;
+        default:
+          console.warn("Unhandled message type:", msgType);
+      }
+    };
+  }
 
-    this.socket.on("playback:loaded", (msg) => {
-      this.handlePlaybackLoaded(msg);
-    });
-
-    this.socket.on("playback:frame", (msg) => {
-      this.handlePlaybackFrame(msg);
-    });
-
-    this.socket.on("playback:eos", (msg) => {
-      this.handlePlaybackEOS(msg);
-    });
-
-    this.socket.on("playback:error", (msg) => {
-      this.handlePlaybackError(msg);
-    });
-
-    this.socket.on("playback:seek:ok", (msg) => {
-      this.handlePlaybackSeekOk(msg);
-    });
-
-    this.socket.on("playback:save:ready", (msg) => {
-      this.handlePlaybackSaveReady(msg);
-    });
+  /**
+   * Helper method to serialize and send payloads over the WebSocket
+   */
+  _send(msgType, payload = {}) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: msgType, ...payload }));
+    } else {
+      console.warn(`Cannot send message of type '${msgType}', socket is not open.`);
+    }
   }
 
   /**
@@ -87,7 +117,7 @@ class SlateViewer {
    */
   requestCheckpoints() {
     console.log("Requesting checkpoints");
-    this.socket.emit("send_checkpoints");
+    this._send("send_checkpoints");
   }
 
   /**
@@ -95,18 +125,16 @@ class SlateViewer {
    */
   requestRunHistory() {
     console.log("Requesting run history");
-    this.socket.emit("get_run_history");
+    this._send("get_run_history");
   }
 
   /**
    * Handle checkpoint list updates from the server
-   * @param {Object} msg - Message containing checkpoint data
    */
   handleCheckpointsUpdate(msg) {
     console.log("Received checkpoints:", msg.payload.checkpoints);
     this.checkpointsReceived = true;
     
-    // Clear any pending retry
     if (this.retryTimeout) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
@@ -115,7 +143,6 @@ class SlateViewer {
     const checkpoints = msg.payload.checkpoints;
     const selectElement = document.getElementById("ckpt_select");
     
-    // Add loading animation
     selectElement.classList.add('loading');
     
     setTimeout(() => {
@@ -132,45 +159,32 @@ class SlateViewer {
       selectElement.classList.remove('loading');
     }, 300);
     
-    // Reset retry count on successful response
     this.checkpointRetryCount = 0;
   }
 
   /**
    * Handle frame updates from the ML client (live mode only)
-   * @param {Object} msg - Message containing frame data
    */
   handleFrameUpdate(msg) {
-    if (this.isPlaybackMode) {
-      return;
-    }
+    if (this.isPlaybackMode) return;
 
     const payload = msg.payload;
     const frameElement = document.getElementById("env_frame");
     
-    // Add subtle animation to frame updates
     frameElement.style.opacity = '0.7';
-    
-    // Update frame image
     frameElement.src = "data:image/jpeg;base64," + payload.frame;
     
-    // Restore opacity after image loads
     frameElement.onload = () => {
       frameElement.style.opacity = '1';
     };
 
-    // Update info display
     this.updateInfoDisplay(payload);
-
-    // Keep dropdown in sync with currently running checkpoint
     this.syncCheckpointDropdown(payload.checkpoint);
 
-    // Update cumulative score with animation
     this.cumulativeScore += payload.reward;
     const scoreElement = document.getElementById("score");
     const newScore = Math.round(this.cumulativeScore);
     
-    // Animate score change
     if (scoreElement.innerText !== newScore.toString()) {
       scoreElement.style.transform = 'scale(1.1)';
       scoreElement.style.color = '#28a745';
@@ -185,7 +199,6 @@ class SlateViewer {
 
   /**
    * Handle run history updates from the server
-   * @param {Object} msg - Message containing run history data
    */
   handleRunHistoryUpdate(msg) {
     console.log("Received run history:", msg.run_history);
@@ -194,7 +207,6 @@ class SlateViewer {
 
   /**
    * Handle playback loaded event from the server
-   * @param {Object} msg - Message containing run metadata
    */
   handlePlaybackLoaded(msg) {
     console.log("Playback loaded:", msg.payload);
@@ -207,36 +219,41 @@ class SlateViewer {
 
   /**
    * Handle playback frame event from the server
-   * @param {Object} msg - Message containing frame data
    */
   handlePlaybackFrame(msg) {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
     const frameData = msg.frame_data;
     const cursor = msg.cursor;
 
-    // Update frame display
     const frameElement = document.getElementById("env_frame");
     frameElement.style.opacity = '0.7';
     
-    // Handle different frame_data structures
     let frameImage, reward, qValues, action, checkpoint;
     
+    let parsedData = frameData;
     if (typeof frameData === 'string') {
-      // If frame_data is just the base64 string
-      frameImage = frameData;
-    } else if (frameData && frameData.frame) {
-      // If frame_data is an object with frame property
-      frameImage = frameData.frame;
-      reward = frameData.reward;
-      qValues = frameData.q_values;
-      action = frameData.action;
-      checkpoint = frameData.checkpoint || this.currentPlaybackRun.checkpoint;
+      try {
+        parsedData = JSON.parse(frameData);
+      } catch (e) {
+        parsedData = { frame: frameData };
+      }
+    }
+
+    if (parsedData && parsedData.frame) {
+      frameImage = parsedData.frame;
+      
+      const meta = parsedData.metadata || parsedData;
+
+      reward = meta.reward;
+      qValues = meta.q_values;
+      action = meta.action;
+      checkpoint = meta.checkpoint || this.currentPlaybackRun.checkpoint;
     } else {
-      // Fallback: try to extract from metadata if available
-      console.warn("Unexpected frame_data structure:", frameData);
+      console.warn("Unexpected frame_data structure. Received:", frameData);
+      
+      this.isAwaitingFrame = false;
+      this._send("playback:ack");
       return;
     }
 
@@ -245,7 +262,6 @@ class SlateViewer {
       frameElement.style.opacity = '1';
     };
 
-    // Update info display if we have the data
     if (qValues !== undefined && action !== undefined) {
       this.updateInfoDisplay({
         q_values: qValues,
@@ -255,18 +271,14 @@ class SlateViewer {
       });
     }
 
-    // Update score (for playback, show the frame's reward)
     if (reward !== undefined) {
       const scoreElement = document.getElementById("score");
       scoreElement.innerText = Math.round(reward);
     }
 
-    // Update current cursor
     this.currentFrameCursor = cursor;
-
-    // Send acknowledgment
     this.isAwaitingFrame = false;
-    this.socket.emit("playback:ack", {});
+    this._send("playback:ack");
 
     if (this.shouldPauseAfterFrame) {
       this.shouldPauseAfterFrame = false;
@@ -278,14 +290,12 @@ class SlateViewer {
 
   /**
    * Handle playback end of stream event
-   * @param {Object} msg - Message containing cursor info
    */
   handlePlaybackEOS(msg) {
     console.log("Playback end of stream at cursor:", msg.cursor);
     this.isPlaybackPaused = true;
     this.isAwaitingFrame = false;
     
-    // Update UI to show paused state
     document.getElementById('playback_play').classList.remove('active');
     document.getElementById('playback_pause').classList.add('active');
     document.getElementById('playback_stop').classList.remove('active');
@@ -293,7 +303,6 @@ class SlateViewer {
 
   /**
    * Handle playback error event
-   * @param {Object} msg - Message containing error info
    */
   handlePlaybackError(msg) {
     console.error("Playback error:", msg.message);
@@ -302,7 +311,6 @@ class SlateViewer {
 
   /**
    * Handle playback seek OK event
-   * @param {Object} msg - Message containing cursor info
    */
   handlePlaybackSeekOk(msg) {
     console.log("Seek successful, cursor:", msg.cursor);
@@ -311,13 +319,11 @@ class SlateViewer {
 
   /**
    * Handle playback save ready event
-   * @param {Object} msg - Message containing download URL
    */
   handlePlaybackSaveReady(msg) {
     console.log("Playback save ready:", msg);
     const downloadUrl = msg.download_url;
     if (downloadUrl) {
-      // Trigger download
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.download = `${msg.run_id}.s4`;
@@ -335,14 +341,12 @@ class SlateViewer {
       console.warn("Cannot save: not in playback mode or no run selected");
       return;
     }
-
     console.log("Saving playback run:", this.currentPlaybackRun.id);
-    this.socket.emit("playback:save", {});
+    this._send("playback:save");
   }
 
   /**
    * Update the history list UI
-   * @param {Array} runHistory - Array of run data
    */
   updateHistoryList(runHistory) {
     const historyList = document.getElementById("run_history_list");
@@ -371,11 +375,10 @@ class SlateViewer {
 
   /**
    * Start playback of a specific run
-   * @param {number} runId - ID of the run to playback
    */
   startPlayback(runId) {
     console.log("Loading playback for run:", runId);
-    this.socket.emit("playback:load", { run_id: runId });
+    this._send("playback:load", { run_id: runId });
   }
 
   /**
@@ -384,19 +387,13 @@ class SlateViewer {
   enterPlaybackMode() {
     this.isPlaybackMode = true;
     
-    // Show playback controls
     document.getElementById("playback_controls").style.display = "block";
+    document.getElementById("playback_status").textContent = `Playing back Run ${this.currentPlaybackRun.id}`;
     
-    // Update playback status
-    document.getElementById("playback_status").textContent = 
-      `Playing back Run ${this.currentPlaybackRun.id}`;
-    
-    // Update mode indicator
     const modeStatus = document.getElementById("mode_status");
     modeStatus.className = "mode-status playback-mode";
     modeStatus.querySelector(".mode-text").textContent = "Playback Mode";
     
-    // Start paused by default
     this.isPlaybackPaused = true;
     document.getElementById('playback_play').classList.add('active');
     document.getElementById('playback_pause').classList.remove('active');
@@ -413,20 +410,15 @@ class SlateViewer {
     this.isPlaybackPaused = true;
     this.isAwaitingFrame = false;
     
-    // Hide playback controls
     document.getElementById("playback_controls").style.display = "none";
-    
-    // Reset playback buttons
     document.getElementById("playback_play").classList.remove("active");
     document.getElementById("playback_pause").classList.remove("active");
     document.getElementById("playback_stop").classList.remove("active");
     
-    // Reset mode indicator
     const modeStatus = document.getElementById("mode_status");
     modeStatus.className = "mode-status live-mode";
     modeStatus.querySelector(".mode-text").textContent = "Live Mode";
     
-    // Reset score
     this.cumulativeScore = 0;
     document.getElementById("score").innerText = "–";
   }
@@ -435,14 +427,11 @@ class SlateViewer {
    * Resume playback (start streaming)
    */
   resumePlayback() {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
     this.isPlaybackPaused = false;
-    this.socket.emit("playback:resume", {});
+    this._send("playback:resume");
     
-    // Update UI
     document.getElementById('playback_play').classList.remove('active');
     document.getElementById('playback_pause').classList.add('active');
     document.getElementById('playback_stop').classList.remove('active');
@@ -452,14 +441,11 @@ class SlateViewer {
    * Pause playback
    */
   pausePlayback() {
-    if (!this.isPlaybackMode) {
-      return;
-    }
+    if (!this.isPlaybackMode) return;
 
     this.isPlaybackPaused = true;
-    this.socket.emit("playback:pause", {});
+    this._send("playback:pause");
     
-    // Update UI
     document.getElementById('playback_play').classList.add('active');
     document.getElementById('playback_pause').classList.remove('active');
     document.getElementById('playback_stop').classList.remove('active');
@@ -469,14 +455,11 @@ class SlateViewer {
    * Stop playback and seek to beginning
    */
   stopPlayback() {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
     this.isPlaybackPaused = true;
-    this.socket.emit("playback:seek", { frame: 0 });
+    this._send("playback:seek", { frame: 0 });
     
-    // Update UI
     document.getElementById('playback_play').classList.add('active');
     document.getElementById('playback_pause').classList.remove('active');
     document.getElementById('playback_stop').classList.add('active');
@@ -484,35 +467,24 @@ class SlateViewer {
 
   /**
    * Seek to a specific frame
-   * @param {number} frameIndex - Frame index to seek to
    */
   seekToFrame(frameIndex) {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
     if (frameIndex < 0 || frameIndex >= this.currentPlaybackRun.total_steps) {
       console.warn("Seek frame out of range:", frameIndex);
       return;
     }
-
-    this.socket.emit("playback:seek", { frame: frameIndex });
+    this._send("playback:seek", { frame: frameIndex });
   }
 
   /**
    * Step forward one frame
    */
   stepForward() {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
-    // Pause playback if playing
-    if (!this.isPlaybackPaused) {
-      this.pausePlayback();
-    }
-
-    // Step to next frame
+    if (!this.isPlaybackPaused) this.pausePlayback();
     const nextFrame = Math.min(this.currentFrameCursor + 1, this.currentPlaybackRun.total_steps - 1);
     this.seekToFrameAndFetch(nextFrame);
   }
@@ -521,53 +493,35 @@ class SlateViewer {
    * Step backward one frame
    */
   stepBackward() {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
-    // Pause playback if playing
-    if (!this.isPlaybackPaused) {
-      this.pausePlayback();
-    }
-
-    // Step to previous frame
+    if (!this.isPlaybackPaused) this.pausePlayback();
     const prevFrame = Math.max(this.currentFrameCursor - 1, 0);
     this.seekToFrameAndFetch(prevFrame);
   }
 
   /**
    * Seek to a frame and fetch it (for stepping while paused)
-   * @param {number} frameIndex - Frame index to seek to
    */
   seekToFrameAndFetch(frameIndex) {
-    if (!this.isPlaybackMode || !this.currentPlaybackRun) {
-      return;
-    }
+    if (!this.isPlaybackMode || !this.currentPlaybackRun) return;
 
     if (frameIndex < 0 || frameIndex >= this.currentPlaybackRun.total_steps) {
       console.warn("Seek frame out of range:", frameIndex);
       return;
     }
 
-    // If paused, we need to briefly resume to get the frame, then pause again
     if (this.isPlaybackPaused) {
-      // Set a flag to pause after receiving the next frame
       this.shouldPauseAfterFrame = true;
-      
-      // Seek to the frame
-      this.socket.emit("playback:seek", { frame: frameIndex });
-      
-      // Resume briefly to trigger frame send
-      this.socket.emit("playback:resume", {});
+      this._send("playback:seek", { frame: frameIndex });
+      this._send("playback:resume");
     } else {
-      // If already playing, just seek
-      this.socket.emit("playback:seek", { frame: frameIndex });
+      this._send("playback:seek", { frame: frameIndex });
     }
   }
 
   /**
    * Update the info display with current environment data
-   * @param {Object} payload - Frame update payload
    */
   updateInfoDisplay(payload) {
     const qvals = payload.q_values.map((v) => Number(v).toFixed(2));
@@ -581,7 +535,6 @@ class SlateViewer {
 
   /**
    * Sync the checkpoint dropdown with the currently running checkpoint
-   * @param {string} checkpoint - Current checkpoint name
    */
   syncCheckpointDropdown(checkpoint) {
     const selectElement = document.getElementById("ckpt_select");
@@ -592,18 +545,12 @@ class SlateViewer {
 
   /**
    * Add an option to a select element
-   * @param {HTMLElement} selectElement - The select element
-   * @param {string} text - Option text
-   * @param {boolean} disabled - Whether the option is disabled
-   * @param {string} value - Option value (optional)
    */
   addOption(selectElement, text, disabled = false, value = null) {
     const option = document.createElement("option");
     option.textContent = text;
     option.disabled = disabled;
-    if (value) {
-      option.value = value;
-    }
+    if (value) option.value = value;
     selectElement.appendChild(option);
   }
 
@@ -623,7 +570,7 @@ class SlateViewer {
         if (!this.checkpointsReceived) {
           console.log(`Retrying checkpoint request (${this.checkpointRetryCount}/${this.maxRetries})`);
           this.requestCheckpoints();
-          this.scheduleRetry(); // Schedule next retry
+          this.scheduleRetry();
         }
       }, 3000);
     } else if (!this.checkpointsReceived) {
@@ -635,10 +582,8 @@ class SlateViewer {
 
   /**
    * Send a command to the ML client
-   * @param {string} command - Command to send
    */
   sendCommand(command) {
-    // Don't send commands to ML client if in playback mode
     if (this.isPlaybackMode) {
       console.log("Ignoring command in playback mode:", command);
       return;
@@ -647,21 +592,18 @@ class SlateViewer {
     if (command === "reset") {
       this.cumulativeScore = 0;
     }
-    this.socket.emit(command);
+    this._send(command);
   }
 
   /**
    * Handle checkpoint selection
-   * @param {HTMLElement} selectElement - The select element that was changed
    */
   onSelectCheckpoint(selectElement) {
-    this.socket.emit("select_checkpoint", { checkpoint: selectElement.value });
+    this._send("select_checkpoint", { checkpoint: selectElement.value });
   }
 
   /**
    * Update connection status indicator
-   * @param {string} status - Connection status ('connected', 'disconnected', 'connecting')
-   * @param {string} text - Status text to display
    */
   updateConnectionStatus(status, text) {
     const statusDot = document.querySelector('.status-dot');

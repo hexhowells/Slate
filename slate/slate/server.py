@@ -1,47 +1,73 @@
 from __future__ import annotations
 
-from flask import Flask, send_from_directory, request, send_file
-from flask_socketio import SocketIO
 import asyncio
-import threading
 import json
-import websockets
-from pathlib import Path
 import logging
-import time
-from io import BytesIO
+import uuid
+from pathlib import Path
+from typing import TypeAlias
+
+import threading
+import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from slate.run_history import RunHistory
 from slate.session import Session
 from slate.video.codec import encode_video_to_s4
+from slate.router import Router
 
-logging.getLogger('werkzeug').disabled = True
-
-
-# Resolve static assets directory (prefer repo dev path if present)
 _PKG_DIR = Path(__file__).parent
 _REPO_STATIC = _PKG_DIR.parent.parent / "server" / "static"
 _PKG_STATIC = _PKG_DIR / "static"
 STATIC_DIR = _REPO_STATIC if _REPO_STATIC.exists() else _PKG_STATIC
 
+sid: TypeAlias = str
 
-app = Flask(
-    __name__,
-    static_folder=str(STATIC_DIR),
-    static_url_path="/static",
-)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+ml_clients: set[WebSocket] = set()
+web_clients: dict[WebSocket, sid] = {}
+sessions: dict[sid, Session] = {}
 
+run_history = RunHistory(max_history_size=5)
 
-ML_WS_PORT = 8765
-ml_loop = asyncio.new_event_loop()
-ml_clients = set()
+router = Router()
 
-MAX_HISTORY_SIZE = 5
-run_history = RunHistory(MAX_HISTORY_SIZE)
+app = FastAPI()
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-sessions: dict[str, Session] = {}
+@app.get("/")
+async def index() -> FileResponse:
+    """
+    Serve the dashboard and request the latest checkpoints from the ML side.
+
+    Returns:
+        A FastAPI response that serves `index.html` from the resolved static dir.
+    """
+    await _send_to_ml({"type": "send_checkpoints"})
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/playback/{run_id}")
+async def download_playback(run_id: int) -> Response:
+    """
+    HTTP route to download a playback object
+
+    Args:
+        run_id: the id of the playback object to fetch
+    
+    Returns:
+        a response containing the playback file bytes
+    """
+    run_data = run_history.fetch_recording(int(run_id))
+    video_bytes = encode_video_to_s4(run_data)
+    
+    return Response(
+        content=video_bytes,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename=slate_run_{run_id}.s4"}
+    )
 
 
 def get_session(sid: str) -> Session:
@@ -64,90 +90,56 @@ def get_session(sid: str) -> Session:
     return sess
 
 
-@app.route("/")
-def index():
-    """Serve the dashboard and request the latest checkpoints from the ML side.
-
-    Returns:
-        A Flask response that serves `index.html` from the resolved static dir.
+async def _send_to_ml(payload: dict) -> None:
     """
-    _send_to_ml({"type": "send_checkpoints"})
-    return send_from_directory(str(STATIC_DIR), "index.html")
-
-
-async def ml_handler(ws) -> None:
-    """Handle a single ML runtime WebSocket connection.
-
-    Adds the connection to the client set and forwards any JSON messages from
-    the ML runtime to the browser via Socket.IO, using the `type` field as the
-    event name. Removes the connection on disconnect.
-
-    Args:
-        ws: The connected WebSocket server protocol instance.
-    """
-    ml_clients.add(ws)
-    try:
-        async for msg in ws:
-            data = json.loads(msg)
-            msg_type = data.get("type", None)
-            
-            match msg_type:
-                case "frame_update":
-                    if run_history.recording:
-                        run_history.update_recording(data['payload'])
-                    else:
-                        run_history.new_recording(data['payload'])
-                    socketio.emit(msg_type, data)
-                case "checkpoints_update":
-                    socketio.emit(msg_type, data)
-                case "run_completed":
-                    run_history.stop_recording()
-                    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
-                case _:
-                    print(f"ML Websocket received unknown message type: {msg_type}, ignoring")
-                
-    finally:
-        ml_clients.discard(ws)
-
-
-async def ml_server(ml_host: str = "127.0.0.1") -> None:
-    """Start the ML WebSocket server and wait indefinitely.
-
-    The server listens on 127.0.0.1 at `ML_WS_PORT` and spawns `ml_handler`
-    for each incoming connection.
-
-    Args:
-        ml_host: the HTTP web host of the websocket
-    """
-    async with websockets.serve(ml_handler, ml_host, ML_WS_PORT):
-        print(f"[Slate] waiting for ML on ws://{ml_host}:{ML_WS_PORT}")
-        await asyncio.Future()
-    
-
-def _send_to_ml(payload: dict) -> None:
-    """Send a JSON payload to all connected ML runtime WebSocket clients.
+    Send a JSON payload to all connected ML runtime WebSocket clients.
 
     Args:
         payload: Dictionary that will be JSON-encoded and sent.
     """
     if not ml_clients:
         return
+        
     txt = json.dumps(payload)
-    for ws in list(ml_clients):
-        asyncio.run_coroutine_threadsafe(ws.send(txt), ml_loop)
+    
+    clients_list = list(ml_clients)
+    
+    results = await asyncio.gather(
+        *(ws.send_text(txt) for ws in clients_list),
+        return_exceptions=True
+    )
+    
+    disconnected = {
+        ws for ws, result in zip(clients_list, results) 
+        if isinstance(result, Exception)
+    }
+            
+    if disconnected:
+        ml_clients.difference_update(disconnected)
 
 
-def get_request_id() -> str:
+async def _broadcast_to_web(payload: dict) -> None:
     """
-    Get current socketio SID
+    Broadcast data to the UI client via a websocket
 
-    Return:
-        current socketio SID
+    Args:
+        payload: the payload object to broadcast
     """
-    return request.sid  # type: ignore
+    if not web_clients:
+        return
+    txt = json.dumps(payload)
+    
+    results = await asyncio.gather(
+        *(ws.send_text(txt) for ws in web_clients.keys()),
+        return_exceptions=True
+    )
+    
+    for ws, result in zip(web_clients.keys(), results):
+        if isinstance(result, Exception):
+            web_clients.pop(ws, None)
 
 
-def stream_run(session: Session) -> None:
+async def stream_run(session: Session, ws: WebSocket) -> None:
     """
     Start streaming a run to the client
 
@@ -155,23 +147,19 @@ def stream_run(session: Session) -> None:
 
     Args:
         session: Session object storing information about the current session
+        ws: the websocket connection
     """
     while True:
         with session.lock:
             if not session.streaming:
                 break
 
-            if session.paused:
-                pass
-            elif session.awaiting_ack:
-                pass
-            else:
-                run_id = session.asset.get("id")
+            if not session.paused and not session.awaiting_ack:
                 cursor = session.cursor
-
                 total_steps: int = session.asset.get("total_steps", 0)
+                
                 if cursor >= total_steps:
-                    socketio.emit("playback:eos", {"cursor": cursor})
+                    await ws.send_text(json.dumps({"type": "playback:eos", "cursor": cursor}))
                     session.streaming = False
                     break
 
@@ -182,142 +170,231 @@ def stream_run(session: Session) -> None:
         with session.lock:
             if not session.streaming:
                 break
-
             paused = session.paused
             awaiting = session.awaiting_ack
             last_cursor = session.last_sent_cursor
             run_id = session.asset.get("id", 0)
         
-        if (not paused) and (awaiting) and (last_cursor is not None):
+        if not paused and awaiting and last_cursor is not None:
             frame_data = run_history.fetch_recording_frame(run_id, last_cursor)
             if frame_data:
-                socketio.emit("playback:frame", {"frame_data": frame_data, "cursor": last_cursor})
+                await ws.send_text(json.dumps({"type": "playback:frame", "frame_data": frame_data, "cursor": last_cursor}))
             else:
-                socketio.emit("playback:error", 
-                            {
-                                  "message": 
-                                  f"No frame could be loaded for cursor position {last_cursor}"
-                            })
+                await ws.send_text(json.dumps({
+                    "type": "playback:error", 
+                    "message": f"No frame could be loaded for cursor {last_cursor}"
+                }))
         
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
     
     with session.lock:
         session.streaming = False
         session.awaiting_ack = False
 
 
-def launch_stream(session: Session) -> None:
+async def launch_stream(session: Session, ws: WebSocket) -> None:
     """
     Start video stream if the stream has not already started
 
     Args:
         session: Session object containing the session information
+        ws: the websocket connection
     """
     with session.lock:
         if session.streaming:
             return
         session.streaming = True
-    socketio.start_background_task(stream_run, session)
+    asyncio.create_task(stream_run(session, ws))
 
 
-@socketio.on("step")
-def on_step(_data=None) -> None:
-    """Request a single environment step from the ML runtime."""
-    _send_to_ml({"type": "step"})
+@app.websocket("/ws/ui")
+async def web_handler(ws: WebSocket) -> None:
+    """
+    Route handler for websocket messages from the UI
+
+    Args:
+        ws: the websocket connection
+    """
+    await ws.accept()
+    client_sid = str(uuid.uuid4())
+    web_clients[ws] = client_sid
+    
+    try:
+        while True:
+            msg = await ws.receive_text()
+            data = json.loads(msg)
+            msg_type = data.get("type")
+            await router.dispatch(msg_type, client_sid, ws, data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        web_clients.pop(ws, None)
 
 
-@socketio.on("run")
-def on_run(_data=None) -> None:
-    """Start continuous stepping on the ML runtime."""
-    _send_to_ml({"type": "run"})
+@router.on("step")
+async def on_step(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Request a single environment step from the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "step"})
 
 
-@socketio.on("pause")
-def on_pause(_data=None) -> None:
-    """Pause continuous stepping on the ML runtime."""
-    _send_to_ml({"type": "pause"})
+@router.on("run")
+async def on_run(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Start continuous stepping on the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "run"})
 
 
-@socketio.on("reset")
-def on_reset(_data=None) -> None:
-    """Reset the environment on the ML runtime."""
-    _send_to_ml({"type": "reset"})
+@router.on("pause")
+async def on_pause(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Pause continuous stepping on the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "pause"})
 
 
-@socketio.on("select_checkpoint")
-def on_select_checkpoint(data) -> None:
+@router.on("reset")
+async def on_reset(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Reset the environment on the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "reset"})
+
+
+@router.on("select_checkpoint")
+async def on_select_checkpoint(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """Ask the ML runtime to load a specific checkpoint.
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: Dict containing a `checkpoint` key with the identifier/path.
     """
-    _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
+    await _send_to_ml({"type": "select_checkpoint", "checkpoint": data.get("checkpoint", "")})
 
 
-@socketio.on("send_checkpoints")
-def on_send_checkpoints(_data=None) -> None:
-    """Request the list of available checkpoints from the ML runtime."""
-    _send_to_ml({"type": "send_checkpoints"})
+@router.on("send_checkpoints")
+async def on_send_checkpoints(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Request the list of available checkpoints from the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "send_checkpoints"})
 
 
-@socketio.on("send_run_history")
-def on_send_run_history(_data=None) -> None:
-    """Request the run history from the ML runtime."""
-    _send_to_ml({"type": "send_run_history"})
+@router.on("send_run_history")
+async def on_send_run_history(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
+    """
+    Request the run history from the ML runtime.
+    
+    Args:
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
+    """
+    await _send_to_ml({"type": "send_run_history"})
 
 
-@app.route("/playback/<run_id>")
-def download_playback(run_id: int):
-    run_data = run_history.fetch_recording(int(run_id))
-    video_bytes = encode_video_to_s4(run_data)
-
-    return send_file(
-        BytesIO(video_bytes),
-        as_attachment=True,
-        download_name=f"slate_run_{run_id}.s4",
-    )
-
-
-@socketio.on("playback:save")
-def on_playback_save(data) -> None:
+@router.on("playback:save")
+async def on_playback_save(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Generate a download id to download a playback video from
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: data sent from the client
     """
-    sid = get_request_id()
     sess = get_session(sid)
 
     run_id = sess.asset["id"]
-
-    download_url = f"/playback/{run_id}"
-
-    socketio.emit(
-        "playback:save:ready",
-        {"run_id": run_id, "download_url": download_url}
-    )
+    await ws.send_text(json.dumps({
+        "type": "playback:save:ready", 
+        "run_id": run_id, 
+        "download_url": f"/playback/{run_id}"
+    }))
 
 
-@socketio.on("playback:load")
-def on_playback_load(data) -> None:
+@router.on("playback:load")
+async def on_playback_load(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Load a playback video given an run ID
 
     Verifies the run ID is valid and returns the run metadata to the client
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: Dict containing a `run_id` key with the run identifier.
     """
-    run_id = data.get("run_id", 0)
-    sid = get_request_id()
     sess = get_session(sid)
 
+    run_id = data.get("run_id", 0)
     if run_history.check_id(run_id):
-        on_pause()
-
+        await _send_to_ml({"type": "pause"})
         run_data = run_history.fetch_recording(run_id)
-
         run_info = {
             "id": run_data["id"],
             "timestamp": run_data["timestamp"],
@@ -325,37 +402,40 @@ def on_playback_load(data) -> None:
             "total_reward": run_data["total_reward"],
             "checkpoint": run_data["checkpoint"]
         }
-
         with sess.lock:
             sess.asset = run_info
             sess.cursor = 0
             sess.paused = True
             sess.awaiting_ack = False
             sess.last_sent_cursor = None
-
-        socketio.emit("playback:loaded", {"payload": run_info})
+        await ws.send_text(json.dumps({"type": "playback:loaded", "payload": run_info}))
     else:
-        socketio.emit("playback:error", {"message": f"Run ID {run_id} could not be found."})
+        await ws.send_text(json.dumps({"type": "playback:error", "message": f"Run ID {run_id} not found."}))
 
 
-@socketio.on("playback:seek")
-def on_playback_seek(data) -> None:
+@router.on("playback:seek")
+async def on_playback_seek(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Seek to a given frame in the playback video
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: data sent from the client - including the frame to seek to
     """
-    cursor = data.get("frame", None)
-    if cursor is None:
-        socketio.emit("playback:error", {"message": "No frame index provided in message."})
-        return
-    
-    sid = get_request_id()
     sess = get_session(sid)
 
+    cursor = data.get("frame")
+    if cursor is None:
+        await ws.send_text(json.dumps({"type": "playback:error", "message": "No frame index provided."}))
+        return
+    
     if not (0 <= cursor < sess.asset.get('total_steps', 0)):
-        socketio.emit("playback:error", {"message": "Frame index is out of range for the given video"})
+        await ws.send_text(json.dumps({"type": "playback:error", "message": "Frame index out of range."}))
         return
     
     with sess.lock:
@@ -365,43 +445,57 @@ def on_playback_seek(data) -> None:
         resume_stream = not sess.paused
     
     if resume_stream:
-        launch_stream(sess)
+        await launch_stream(sess, ws)
     
-    socketio.emit("playback:seek:ok", {"cursor": sess.cursor})
+    await ws.send_text(json.dumps({"type": "playback:seek:ok", "cursor": sess.cursor}))
 
 
-@socketio.on("playback:pause")
-def on_playback_pause(data) -> None:
+@router.on("playback:pause")
+async def on_playback_pause(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Pause the current VOD stream
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: data sent from the client
     """
-    sid = get_request_id()
     sess = get_session(sid)
     with sess.lock:
         sess.paused = True
 
 
-@socketio.on("playback:resume")
-def on_playback_resume(data) -> None:
+@router.on("playback:resume")
+async def on_playback_resume(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Resume the current VOD stream
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: data sent from the client
     """
-    sid = get_request_id()
     sess = get_session(sid)
     with sess.lock:
         sess.paused = False
     
-    launch_stream(sess)
+    await launch_stream(sess, ws)
 
 
-@socketio.on("playback:ack")
-def on_playback_ack(data) -> None:
+@router.on("playback:ack")
+async def on_playback_ack(
+    sid: str, 
+    ws: WebSocket, 
+    data: dict
+) -> None:
     """
     Handler for client ACK messages
 
@@ -409,51 +503,100 @@ def on_playback_ack(data) -> None:
     and processed by the client
 
     Args:
+        sid: the SID of the request
+        ws: the websocket connection
         data: data sent from the client
     """
-    sid = get_request_id()
     sess = get_session(sid)
     
     with sess.lock:
         sess.awaiting_ack = False
 
 
-@socketio.on("get_run_history")
-def on_get_run_history(_data=None) -> None:
-    """Send current run history to the requesting client."""
-    socketio.emit("run_history_update", {"run_history": run_history.get_history_metadata()})
-
-
-def _run_ml_loop(ml_host: str) -> None:
+@router.on("get_run_history")
+async def on_get_run_history(
+    sid: str, 
+    ws: WebSocket, 
+    _data: dict|None=None
+) -> None:
     """
-    Run the ML WebSocket server inside a dedicated asyncio event loop.
+    Send current run history to the requesting client.
     
     Args:
-        ml_host: the HTTP host of the websocket
+        sid: the SID of the request
+        ws: the websocket connection
+        _data: data from the websocket message
     """
-    asyncio.set_event_loop(ml_loop)
-    ml_loop.run_until_complete(ml_server(ml_host))
+    await ws.send_text(json.dumps({
+        "type": "run_history_update", 
+        "run_history": run_history.get_history_metadata()
+    }))
+
+
+@app.websocket("/ws/ml")
+async def ml_handler(ws: WebSocket) -> None:
+    """
+    Handle a single ML runtime WebSocket connection.
+
+    Adds the connection to the client set and forwards any JSON messages from
+    the ML runtime to the browser via the unified broadcast, using the `type` field 
+    as the event name. Removes the connection on disconnect.
+
+    Args:
+        ws: The connected WebSocket instance.
+    """
+    await ws.accept()
+    ml_clients.add(ws)
+    try:
+        while True:
+            msg = await ws.receive_text()
+            data = json.loads(msg)
+            msg_type = data.get("type")
+            
+            match msg_type:
+                case "frame_update":
+                    if run_history.recording:
+                        run_history.update_recording(data['payload'])
+                    else:
+                        run_history.new_recording(data['payload'])
+                    await _broadcast_to_web(data)
+                    
+                case "checkpoints_update":
+                    await _broadcast_to_web(data)
+                    
+                case "run_completed":
+                    run_history.stop_recording()
+                    await _broadcast_to_web({
+                        "type": "run_history_update", 
+                        "run_history": run_history.get_history_metadata()
+                    })
+                    
+                case _:
+                    logging.warning(f"ML Websocket received unknown message type: {msg_type}")
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ml_clients.discard(ws)
 
 
 def start_local_server(
         host: str = "0.0.0.0",
         port: int = 8000,
-        ml_host: str = "0.0.0.0",
     ) -> None:
     """
-    Start the local Slate dashboard server and the ML WebSocket bridge in background threads.
+    Start the unified FastAPI server handling both HTTP and WebSockets in a background thread.
 
     Args:
-        host: HTTP host for the dashboard.
-        port: HTTP port for the dashboard.
-        ml_host: HTTP host for ML websocket
+        host: HTTP host for the application
+        port: HTTP port for the application
     """
-    # Start ML websocket bridge in background
-    threading.Thread(target=lambda: _run_ml_loop(ml_host), name="slate-ml-ws", daemon=True).start()
-
-    # Start Flask-SocketIO web server in background
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    
+    # Run the ASGI server in a background thread so it doesn't block 
+    # the ML client from launching its own asyncio loop on the main OS thread.
     threading.Thread(
-        target=lambda: socketio.run(app, host=host, port=port),
-        name="slate-web",
+        target=server.run,
+        name="slate-server",
         daemon=True,
     ).start()
