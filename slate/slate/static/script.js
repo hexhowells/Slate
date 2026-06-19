@@ -231,22 +231,18 @@ class SlateViewer {
     
     let frameImage, reward, qValues, action, checkpoint;
     
-    // 1. Robust Parsing: Handle potential stringified JSON from the database
     let parsedData = frameData;
     if (typeof frameData === 'string') {
       try {
         parsedData = JSON.parse(frameData);
       } catch (e) {
-        // If it's a string but not JSON, fallback to treating it as raw base64
         parsedData = { frame: frameData };
       }
     }
 
-    // 2. Extract data considering the nested "metadata" structure from Python
     if (parsedData && parsedData.frame) {
       frameImage = parsedData.frame;
       
-      // Map to the nested metadata dict if it exists, otherwise fallback to flat
       const meta = parsedData.metadata || parsedData;
 
       reward = meta.reward;
@@ -256,20 +252,16 @@ class SlateViewer {
     } else {
       console.warn("Unexpected frame_data structure. Received:", frameData);
       
-      // CRITICAL: We must still ACK the frame even if it's broken, 
-      // otherwise the server's asyncio loop will wait forever for this frame.
       this.isAwaitingFrame = false;
       this._send("playback:ack");
       return;
     }
 
-    // Update Image
     frameElement.src = "data:image/jpeg;base64," + frameImage;
     frameElement.onload = () => {
       frameElement.style.opacity = '1';
     };
 
-    // Update UI Panels
     if (qValues !== undefined && action !== undefined) {
       this.updateInfoDisplay({
         q_values: qValues,
@@ -284,7 +276,6 @@ class SlateViewer {
       scoreElement.innerText = Math.round(reward);
     }
 
-    // Update cursor and acknowledge receipt to server
     this.currentFrameCursor = cursor;
     this.isAwaitingFrame = false;
     this._send("playback:ack");
