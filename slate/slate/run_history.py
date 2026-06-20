@@ -109,7 +109,7 @@ class RunHistory:
 
 
     def stop_recording(self) -> None:
-        assert self.current_recording, "Cannot call stopc_recording - No current recording setup in RunHistory"
+        assert self.current_recording, "Cannot call stop_recording - No current recording setup in RunHistory"
         self.run_history.append(self.current_recording.get_recording())
         self.current_recording = None
 
